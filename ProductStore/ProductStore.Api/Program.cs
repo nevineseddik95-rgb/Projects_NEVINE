@@ -61,7 +61,7 @@ builder.Services.AddRateLimiter(o =>
         ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(10), QueueLimit = 0 }));
 });
-builder.Services.AddValidation();
+
 builder.AddProductStoreDb();
 
 builder.Services.AddControllers()
