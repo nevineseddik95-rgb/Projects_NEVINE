@@ -1,0 +1,117 @@
+import { DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { debounceTime } from 'rxjs';
+import { RealtimeService } from '../../core/realtime.service';
+import { Component, OnInit, inject } from '@angular/core';
+import { DatePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
+import { ApiService } from '../../core/api.service';
+import { KmfPipe } from '../../core/kmf.pipe';
+import { ORDER_STATUSES } from '../../core/models';
+
+@Component({
+  selector: 'app-dashboard',
+  standalone: true,
+  imports: [KmfPipe, DatePipe, RouterLink],
+  template: `
+    <header class="page-head"><div><h1>Dashboard</h1><p class="muted">Orders, payments and customers at a glance</p></div></header>
+    @if (errors.length) {
+      <p class="alert" role="alert">These lists could not be loaded: {{ errors.join(', ') }}. Check that the API is running and you are signed in.</p>
+    }
+
+    <div class="stats">
+      <div class="stat stat-main"><span class="stat-num">{{ revenue | kmf }}</span><span>Revenue from orders that are not cancelled</span></div>
+      <div class="stat"><span class="stat-num">{{ commands.length }}</span><span>Orders in total</span></div>
+      <div class="stat"><span class="stat-num">{{ paymentCount('Payment submitted') }}</span><span>Payments to check</span></div>
+      <div class="stat"><span class="stat-num">{{ products.length }}</span><span>Products</span></div>
+      <div class="stat"><span class="stat-num">{{ customers.length }}</span><span>Customers</span></div>
+    </div>
+
+    <div class="dash-grid">
+      <section class="card">
+        <h2>Orders by status</h2>
+        @for (s of statuses; track s) {
+          <div class="bar-row">
+            <span>{{ s }}</span>
+            <div class="bar"><i [style.width.%]="commands.length ? count(s) / commands.length * 100 : 0"></i></div>
+            <span class="bar-n">{{ count(s) }}</span>
+          </div>
+        }
+      </section>
+
+      <section class="card">
+        <h2>Recent visitors</h2>
+        @for (c of recentVisitors; track c.id) {
+          <p class="line"><span>{{ c.fullName }}</span><span class="muted">{{ c.lastVisit | date: 'medium' }}</span></p>
+        } @empty { <p class="muted">No customer visits recorded yet.</p> }
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="card-head"><h2>Latest orders</h2><a routerLink="/admin/orders">See all orders</a></div>
+      <div class="table-wrap flat">
+        <table>
+          <thead><tr><th>Image</th><th>Reference</th><th>Customer</th><th>Items</th><th>Date</th><th>Status</th><th>Payment</th><th>Total</th></tr></thead>
+          <tbody>
+            @for (o of latest; track o.id) {
+              <tr>
+                <td><img class="thumb" [src]="api.img(o.imageUrl)" alt=""></td>
+                <td>{{ o.referenceNumber }}</td>
+                <td>{{ customerName(o.customerId) }}</td>
+                <td>{{ o.model }}</td>
+                <td>{{ o.date | date: 'mediumDate' }}</td>
+                <td><span class="badge" [class]="'badge s-' + o.status">{{ o.status }}</span></td>
+                <td><span class="badge" [class]="'badge s-' + ('' + o.paymentStatus).split(' ')[0]">{{ o.paymentStatus }}</span></td>
+                <td>{{ o.total | kmf }}</td>
+              </tr>
+            } @empty { <tr><td class="empty" colspan="8">No orders yet.</td></tr> }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `
+})
+export class DashboardComponent implements OnInit {
+  api = inject(ApiService);
+  statuses = ORDER_STATUSES;
+  commands: any[] = [];
+  products: any[] = [];
+  customers: any[] = [];
+  errors: string[] = [];
+
+ private realtime = inject(RealtimeService);
+private destroyRef = inject(DestroyRef);
+
+ngOnInit(): void {
+  this.reload();
+  this.realtime.changes$.pipe(debounceTime(250), takeUntilDestroyed(this.destroyRef)).subscribe(() => this.reload());
+}
+
+private reload(): void {
+  this.errors = [];
+  this.load('commands', d => (this.commands = d));
+  this.load('products', d => (this.products = d));
+  this.load('customers', d => (this.customers = d));
+}
+
+  private load(endpoint: string, set: (d: any[]) => void): void {
+    this.api.list(endpoint).subscribe({
+      next: d => set(Array.isArray(d) ? d : []),
+      error: e => this.errors.push(`${endpoint} (status ${e.status})`)
+    });
+  }
+
+  count(status: string) { return this.commands.filter(c => c.status === status).length; }
+  paymentCount(status: string) { return this.commands.filter(c => c.paymentStatus === status).length; }
+  get revenue() { return this.commands.filter(c => c.status !== 'Cancelled').reduce((s, c) => s + (+c.total || 0), 0); }
+  get latest() {
+    return [...this.commands]
+      .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0))
+      .slice(0, 6);
+  }
+  get recentVisitors() {
+    return this.customers.filter(c => c.lastVisit)
+      .sort((a, b) => String(b.lastVisit).localeCompare(String(a.lastVisit))).slice(0, 6);
+  }
+  customerName(id: string) { return this.customers.find(c => c.id === id)?.fullName ?? 'Unknown'; }
+}

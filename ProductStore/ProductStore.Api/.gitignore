@@ -1,0 +1,18 @@
+# Build outputs
+bin/
+obj/
+*.user
+*.suo
+
+# IDE
+.vs/
+.vscode/
+
+# Secrets — NEVER commit these
+appsettings.Development.json
+*.env
+secrets.json
+
+# OS
+.DS_Store
+Thumbs.db

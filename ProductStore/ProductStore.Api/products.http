@@ -1,0 +1,33 @@
+GET http://localhost:5207/products
+
+###
+GET http://localhost:5207/Products/1
+
+###
+POST http://localhost:5207/Products
+Content-Type: application/json
+
+{
+  "Model": "Ne bracelet",
+  "GenreId": 1,
+  "SizeId": 2,
+  "ColorId":1,
+  "price": 99.9,
+  "releaseDate": "1991-02-06"
+}
+
+###
+PUT http://localhost:5207/Products/1
+Content-Type: application/json
+
+{
+  "Model": "Newww bracelet",
+  "GenreId": 2,
+  "SizeId": 1,
+  "ColorId":3,
+  "price": 100.00,
+  "releaseDate": "2026-11-18"
+}
+
+###
+DELETE http://localhost:5207/Products/1
