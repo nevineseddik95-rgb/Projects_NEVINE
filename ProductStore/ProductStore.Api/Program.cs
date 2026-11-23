@@ -73,6 +73,7 @@ builder.Services.AddCors(o => o.AddPolicy("angular", p =>
     builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 
 var app = builder.Build();
+app.UseStaticFiles();
 // Ensure DB is migrated and has at least one admin user
 using (var scope = app.Services.CreateScope())
 {
@@ -111,7 +112,6 @@ using (var scope = app.Services.CreateScope())
     }
 }
 await app.SeedLookupsAsync();
-app.UseStaticFiles();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -153,9 +153,10 @@ app.Use(async (ctx, next) =>
 
 app.MapHub<AdminHub>("/hubs/admin");
 app.MapAuthEndpoints();
+app.MapFallbackToFile("index.html");
 app.MapAdminsEndpoints();
 // ...your other app.Map...Endpoints() lines
-app.UseStaticFiles();   // serves wwwroot, so /uploads/x.jpg is reachable
+   
 app.MapPost("/set-image/{id}", async (Guid id, string url, ProductStoreContext db) =>
 {
     var p = await db.Products.FindAsync(id);
@@ -179,7 +180,11 @@ app.MapPost("/upload", async (IFormFile file, IWebHostEnvironment env) =>
 
     return Results.Ok(new { url = $"/uploads/{name}" });
 }).DisableAntiforgery().RequireAuthorization();
-
+app.UseForwardedHeaders();
+app.UsePathBase("/api");     // /api/products and /products reach the same endpoint
+app.UseRouting();            // must come right after UsePathBase
+app.UseDefaultFiles(); 
+app.UseRateLimiter();
 app.UseCors("angular");   // before UseAuthorization()
 app.MapProductsEndpoints();
 app.MapGenreEndpPoints();
@@ -189,10 +194,8 @@ app.MapCustomersEndpoints();
 app.MapCommandsEndpoints();
 app.MapCheckoutEndpoints();
 app.UseHttpsRedirection();
-app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MigrateDb();
-
 app.Run();

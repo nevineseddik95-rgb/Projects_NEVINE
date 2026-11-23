@@ -1,0 +1,7 @@
+**/bin/
+**/obj/
+MaisonChain-app/charm-store/node_modules/
+MaisonChain-app/charm-store/dist/
+MaisonChain-app/charm-store/.angular/
+.vs/
+.vscode/
