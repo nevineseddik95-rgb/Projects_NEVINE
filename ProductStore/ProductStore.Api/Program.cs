@@ -194,9 +194,5 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MigrateDb();
-app.MapGet("/", () => Results.Ok(new { 
-    service = "ProductStore API", 
-    status = "running",
-    endpoints = new[] { "/auth/login", "/swagger" }
-}));
+
 app.Run();
