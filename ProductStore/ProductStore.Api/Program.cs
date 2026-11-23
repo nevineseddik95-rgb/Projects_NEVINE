@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using ProductStore.Api.Hubs;
 using ProductStore.Api.Models;
+using ProductStore.Api.Seed;
 
 var builder = WebApplication.CreateBuilder(args);
 var jwtKey = builder.Configuration["Jwt:Key"]
@@ -109,6 +110,7 @@ using (var scope = app.Services.CreateScope())
         else app.Logger.LogWarning("No owner account exists. Set Admin:Username and Admin:Password with dotnet user-secrets.");
     }
 }
+await app.SeedLookupsAsync();
 app.UseStaticFiles();
 app.UseRateLimiter();
 app.UseAuthentication();
