@@ -72,7 +72,26 @@ builder.Services.AddCors(o => o.AddPolicy("angular", p =>
     builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 
 var app = builder.Build();
+// Ensure DB is migrated and has at least one admin user
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<ProductStoreContext>();
+    db.Database.Migrate();   // creates tables if missing
 
+    if (!db.AdminUsers.Any())
+    {
+        var hasher = new PasswordHasher<AdminUser>();
+        var admin = new AdminUser
+        {
+            Username = "admin",
+            Role = "Admin"
+        };
+        admin.PasswordHash = hasher.HashPassword(admin, "ChangeMe123!");
+
+        db.AdminUsers.Add(admin);
+        db.SaveChanges();
+    }
+}
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ProductStoreContext>();
@@ -173,5 +192,9 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MigrateDb();
-
+app.MapGet("/", () => Results.Ok(new { 
+    service = "ProductStore API", 
+    status = "running",
+    endpoints = new[] { "/auth/login", "/swagger" }
+}));
 app.Run();
