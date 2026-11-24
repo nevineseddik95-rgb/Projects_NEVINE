@@ -10,7 +10,9 @@
   <ItemGroup>
     <Content Include="wwwroot\**\*" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
-
+<ItemGroup>
+  <Content Update="wwwroot\**\*" CopyToPublishDirectory="PreserveNewest" />
+</ItemGroup>
   <ItemGroup>
     <PackageReference Include="MailKit" Version="5.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
