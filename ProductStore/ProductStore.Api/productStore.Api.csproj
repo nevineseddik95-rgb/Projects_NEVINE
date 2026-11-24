@@ -7,16 +7,21 @@
     <UserSecretsId>ed3bef26-2208-47d5-b91c-2562f75b3721</UserSecretsId>
   </PropertyGroup>
 
+  <!-- Use 'Update' instead of 'Include' to modify the SDK's default wwwroot items -->
   <ItemGroup>
-    <Content Include="wwwroot\**\*" CopyToPublishDirectory="PreserveNewest" />
+    <Content Update="wwwroot\**\*" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
-<ItemGroup>
-  <Content Update="wwwroot\**\*" CopyToPublishDirectory="PreserveNewest" />
-</ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="MailKit" Version="5.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
-    <!-- ... other packages unchanged ... -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
+    <PackageReference Include="MimeKit" Version="5.0.0" />
+    <PackageReference Include="Vonage" Version="8.35.0" />
   </ItemGroup>
 
 </Project>
