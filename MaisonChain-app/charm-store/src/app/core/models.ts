@@ -2,7 +2,7 @@ export interface Option { value: any; label: string; }
 
 export type FieldType =
   | 'text' | 'email' | 'textarea' | 'number' | 'money'
-  | 'select' | 'image' | 'color' | 'date' | 'datetime'| 'password';
+  | 'select' | 'image' | 'color' | 'date' | 'datetime' | 'password';
 
 export interface Field {
   key: string;

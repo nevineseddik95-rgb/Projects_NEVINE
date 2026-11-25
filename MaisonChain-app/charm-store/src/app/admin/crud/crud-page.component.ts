@@ -1,16 +1,16 @@
 import { Component, DestroyRef, OnInit, inject } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { debounceTime } from 'rxjs';
-import { AuthService } from '../../core/auth.service';
-import { RealtimeService } from '../../core/realtime.service';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { debounceTime } from 'rxjs';
 import { ApiService } from '../../core/api.service';
+import { AuthService } from '../../core/auth.service';
 import { KmfPipe } from '../../core/kmf.pipe';
+import { RealtimeService } from '../../core/realtime.service';
 import { CrudConfig, Field, Option, RowAction } from '../../core/models';
 
-/** One reusable list + create/edit/delete screen, driven by a CrudConfig (see entities.ts). */
+/** One reusable list + create/edit/view/delete screen, driven by a CrudConfig (see entities.ts). */
 @Component({
   selector: 'app-crud-page',
   standalone: true,
@@ -19,12 +19,13 @@ import { CrudConfig, Field, Option, RowAction } from '../../core/models';
 })
 export class CrudPageComponent implements OnInit {
   private api = inject(ApiService);
- private route = inject(ActivatedRoute);
-private destroyRef = inject(DestroyRef);
-private realtime = inject(RealtimeService);
-cfg: CrudConfig = this.route.snapshot.data['config'];
-canEdit = inject(AuthService).isOwner();     // view-only admins cannot change anything
-viewOnly = false;
+  private route = inject(ActivatedRoute);
+  private destroyRef = inject(DestroyRef);
+  private realtime = inject(RealtimeService);
+
+  cfg: CrudConfig = this.route.snapshot.data['config'];
+  canEdit = inject(AuthService).isOwner();     // view-only admins cannot change anything
+  viewOnly = false;
 
   rows: any[] = [];
   lookups: Record<string, any[]> = {};
@@ -46,39 +47,39 @@ viewOnly = false;
   sortDir: 'asc' | 'desc' = 'asc';
 
   ngOnInit(): void {
-  this.load();
-  this.clearFilters();
-  this.loadLookups();
+    this.load();
+    this.clearFilters();
+    this.loadLookups();
 
-  // a link from the notification bell opens the list already filtered to that order
-  this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(p => {
-    const q = p.get('q');
-    if (q !== null) this.search = q;
-  });
+    // a link from the notification bell opens the list already filtered to that order
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(p => {
+      const q = p.get('q');
+      if (q !== null) this.search = q;
+    });
 
-  // the list refreshes by itself when something changes on the server
-  this.realtime.changes$.pipe(debounceTime(250), takeUntilDestroyed(this.destroyRef)).subscribe(res => {
-    const all = res.includes('*');
-    if (all || res.includes(this.cfg.endpoint)) this.load();
-    if (all || this.cfg.fields.some(f => f.lookup && res.includes(f.lookup))) this.loadLookups();
-  });
-}
-
-private loadLookups(): void {
-  const names = new Set(this.cfg.fields.filter(f => f.lookup).map(f => f.lookup!));
-  for (const name of names) {
-    this.api.list(name).subscribe({
-      next: d => (this.lookups[name] = d),
-      error: () => (this.error = `The list "${name}" could not be loaded from the API.`)
+    // the list refreshes by itself when something changes on the server
+    this.realtime.changes$.pipe(debounceTime(250), takeUntilDestroyed(this.destroyRef)).subscribe(res => {
+      const all = res.includes('*');
+      if (all || res.includes(this.cfg.endpoint)) this.load();
+      if (all || this.cfg.fields.some(f => f.lookup && res.includes(f.lookup))) this.loadLookups();
     });
   }
-}
 
   load(): void {
     this.api.list(this.cfg.endpoint).subscribe({
       next: r => { this.rows = r; this.error = ''; },
       error: () => (this.error = 'Could not load the list. Check that the API is running and you are signed in.')
     });
+  }
+
+  private loadLookups(): void {
+    const names = new Set(this.cfg.fields.filter(f => f.lookup).map(f => f.lookup!));
+    for (const name of names) {
+      this.api.list(name).subscribe({
+        next: d => (this.lookups[name] = d),
+        error: () => (this.error = `The list "${name}" could not be loaded from the API.`)
+      });
+    }
   }
 
   get listFields(): Field[] { return this.cfg.fields.filter(f => !f.hideInList); }

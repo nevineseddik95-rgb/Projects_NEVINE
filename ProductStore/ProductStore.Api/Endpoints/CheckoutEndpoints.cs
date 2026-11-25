@@ -136,18 +136,18 @@ public static class CheckoutEndpoints
             var emailLines = lines.Select(l => (l.Item.Model, l.Qty, l.Item.Price)).ToList();
 
             // a failed email or text message never cancels the order
-            var emailSent = emailAddress.Length > 0 && await email.SendAsync(
-                emailAddress, name,
-                $"Your order {order.ReferenceNumber} - Charm Store",
-                BuildConfirmationEmail(order, name, instructions, emailLines));
+            // var emailSent = emailAddress.Length > 0 && await email.SendAsync(
+            //     emailAddress, name,
+            //     $"Your order {order.ReferenceNumber} - Charm Store",
+            //     BuildConfirmationEmail(order, name, instructions, emailLines));
 
-            // plain ASCII keeps it in a single text message
-            var smsSent = await sms.SendAsync(phone,
-                $"Charm Store: order {order.ReferenceNumber} received. Pay the {Money(deposit)} deposit with {req.PaymentMethod}. Total {Money(total)}. Keep this reference.");
+            // // plain ASCII keeps it in a single text message
+            // var smsSent = await sms.SendAsync(phone,
+            //     $"Charm Store: order {order.ReferenceNumber} received. Pay the {Money(deposit)} deposit with {req.PaymentMethod}. Total {Money(total)}. Keep this reference.");
 
-            await NotifyAdminAsync(email, config,
-                $"New order {order.ReferenceNumber} - {summary}",
-                BuildAdminNewOrderEmail(order, name, emailAddress.Length > 0 ? emailAddress : "(not given)", phone));
+            // await NotifyAdminAsync(email, config,
+            //     $"New order {order.ReferenceNumber} - {summary}",
+            //     BuildAdminNewOrderEmail(order, name, emailAddress.Length > 0 ? emailAddress : "(not given)", phone));
 
             return Results.Ok(new
             {
@@ -158,8 +158,8 @@ public static class CheckoutEndpoints
                 balance = total - deposit,
                 method = req.PaymentMethod,
                 instructions,
-                emailSent,
-                smsSent,
+                emailSent=false,
+                smsSent=false,
                 phone
             });
         }).RequireRateLimiting("checkout");
