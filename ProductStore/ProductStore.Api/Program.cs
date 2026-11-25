@@ -1,22 +1,26 @@
-using Microsoft.EntityFrameworkCore;
-using productStore.Api.Data;
-using ProductStore.Api.Services;
-using productStore.Api.Endpoints;
-using ProductStore.Api.Endpoints;
 using System.Text;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using productStore.Api.Data;
+using productStore.Api.Endpoints;
+using ProductStore.Api.Endpoints;
 using ProductStore.Api.Hubs;
 using ProductStore.Api.Models;
-using ProductStore.Api.Seed;
+using ProductStore.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ---------- services ----------
+
 var jwtKey = builder.Configuration["Jwt:Key"]
-    ?? throw new InvalidOperationException("Jwt:Key is missing. Set it with dotnet user-secrets.");
+    ?? throw new InvalidOperationException("Jwt:Key is missing. Set it with dotnet user-secrets, or the Railway variable Jwt__Key.");
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
     {
@@ -63,40 +67,35 @@ builder.Services.AddRateLimiter(o =>
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(10), QueueLimit = 0 }));
 });
 
+// Railway puts a proxy in front of the app: use the real visitor address
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    o.KnownNetworks.Clear();
+    o.KnownProxies.Clear();
+});
+
 builder.AddProductStoreDb();
 
-builder.Services.AddControllers()
-    .AddJsonOptions(o => o.JsonSerializerOptions.PropertyNamingPolicy = null);
-
-builder.Services.AddCors(o => o.AddPolicy("angular", p =>
-    p.WithOrigins("http://localhost:4200").AllowAnyHeader().AllowAnyMethod()));
-    builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
-
 var app = builder.Build();
-app.UseStaticFiles();
-// Ensure DB is migrated and has at least one admin user
+
+// ---------- database: tables, starting lists, owner account ----------
+
+app.MigrateDb();    // applies the migrations; your seeding of genres, sizes and colors runs with it
+
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ProductStoreContext>();
-    db.Database.Migrate();   // creates tables if missing
 
-    if (!db.AdminUsers.Any())
+    // remove the old account that was created with a typed-in password and the unsupported role "Admin"
+    var stray = await db.AdminUsers.Where(u => u.Role != "Owner" && u.Role != "Viewer").ToListAsync();
+    if (stray.Count > 0)
     {
-        var hasher = new PasswordHasher<AdminUser>();
-        var admin = new AdminUser
-        {
-            Username = "admin",
-            Role = "Admin"
-        };
-        admin.PasswordHash = hasher.HashPassword(admin, "ChangeMe123!");
-
-        db.AdminUsers.Add(admin);
-        db.SaveChanges();
+        db.AdminUsers.RemoveRange(stray);
+        await db.SaveChangesAsync();
     }
-}
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<ProductStoreContext>();
+
+    // the one owner account comes from Admin:Username and Admin:Password (Railway: Admin__Username, Admin__Password)
     if (!await db.AdminUsers.AnyAsync(u => u.Role == "Owner"))
     {
         var ownerName = builder.Configuration["Admin:Username"]?.Trim().ToLowerInvariant();
@@ -108,10 +107,19 @@ using (var scope = app.Services.CreateScope())
             db.AdminUsers.Add(owner);
             await db.SaveChangesAsync();
         }
-        else app.Logger.LogWarning("No owner account exists. Set Admin:Username and Admin:Password with dotnet user-secrets.");
+        else app.Logger.LogWarning("No owner account exists. Set Admin:Username and Admin:Password (Railway: Admin__Username and Admin__Password).");
     }
 }
-await app.SeedLookupsAsync();
+
+// ---------- pipeline: the order matters ----------
+
+app.UseForwardedHeaders();
+if (app.Environment.IsDevelopment()) app.UseHttpsRedirection();
+
+app.UsePathBase("/api");     // /api/products and /products reach the same endpoint
+app.UseRouting();            // must come right after UsePathBase
+app.UseDefaultFiles();       // serves index.html at "/"
+app.UseStaticFiles();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -151,20 +159,21 @@ app.Use(async (ctx, next) =>
     }
 });
 
+// ---------- endpoints ----------
+
 app.MapHub<AdminHub>("/hubs/admin");
+app.MapGet("/status", () => Results.Ok(new { service = "ProductStore API", status = "running" }));
+
 app.MapAuthEndpoints();
-app.MapFallbackToFile("index.html");
 app.MapAdminsEndpoints();
-// ...your other app.Map...Endpoints() lines
-   
-app.MapPost("/set-image/{id}", async (Guid id, string url, ProductStoreContext db) =>
-{
-    var p = await db.Products.FindAsync(id);
-    if (p is null) return Results.NotFound();
-    p.ImageUrl = url;
-    await db.SaveChangesAsync();
-    return Results.Ok();
-});
+app.MapProductsEndpoints();
+app.MapGenreEndpPoints();
+app.MapColorsEndpPoints();
+app.MapSizesEndpPoints();
+app.MapCustomersEndpoints();
+app.MapCommandsEndpoints();
+app.MapCheckoutEndpoints();
+
 app.MapPost("/upload", async (IFormFile file, IWebHostEnvironment env) =>
 {
     var allowed = new[] { ".jpg", ".jpeg", ".png", ".webp" };
@@ -179,23 +188,8 @@ app.MapPost("/upload", async (IFormFile file, IWebHostEnvironment env) =>
     await file.CopyToAsync(stream);
 
     return Results.Ok(new { url = $"/uploads/{name}" });
-}).DisableAntiforgery().RequireAuthorization();
-app.UseForwardedHeaders();
-app.UsePathBase("/api");     // /api/products and /products reach the same endpoint
-app.UseRouting();            // must come right after UsePathBase
-app.UseDefaultFiles(); 
-app.UseRateLimiter();
-app.UseCors("angular");   // before UseAuthorization()
-app.MapProductsEndpoints();
-app.MapGenreEndpPoints();
-app.MapColorsEndpPoints();
-app.MapSizesEndpPoints();
-app.MapCustomersEndpoints();
-app.MapCommandsEndpoints();
-app.MapCheckoutEndpoints();
-app.UseHttpsRedirection();
-app.UseAuthentication();
-app.UseAuthorization();
+}).DisableAntiforgery().RequireAuthorization("Owner");
 
-app.MigrateDb();
+app.MapFallbackToFile("index.html");     // keep last: lets /cart and /admin open when the page is refreshed
+
 app.Run();
