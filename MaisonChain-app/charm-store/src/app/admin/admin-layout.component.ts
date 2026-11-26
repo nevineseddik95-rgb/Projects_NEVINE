@@ -1,4 +1,5 @@
 import { Component, DestroyRef, HostListener, inject } from '@angular/core';
+import { AsyncPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { Subject, catchError, debounceTime, filter, forkJoin, merge, of, switchMap, timer } from 'rxjs';
@@ -6,16 +7,22 @@ import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { RealtimeService } from '../core/realtime.service';
 
-interface Note { key: string; kind: 'new' | 'payment'; title: string; detail: string; ref: string; }
+interface Note {
+  key: string;
+  kind: 'new' | 'payment';
+  title: string;
+  detail: string;
+  ref: string;
+}
 
 @Component({
   selector: 'app-admin-layout',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive],
+  imports: [AsyncPipe, RouterOutlet, RouterLink, RouterLinkActive],
   template: `
     <div class="admin">
       <nav class="sidebar" aria-label="Admin">
-        <a class="brand" routerLink="/admin">Charm Store</a>
+        <a class="brand" routerLink="/admin">Beauty & Shine</a>
         <ul>
           @for (l of visibleLinks; track l.path) {
             <li>
@@ -38,6 +45,11 @@ interface Note { key: string; kind: 'new' | 'payment'; title: string; detail: st
 
       <main class="content">
         <div class="topbar">
+          @if (realtime.state$ | async; as live) {
+            <span class="live-state" [class.offline]="live !== 'online'">
+              <i aria-hidden="true"></i>{{ live === 'online' ? 'Live updates' : 'Reconnecting…' }}
+            </span>
+          }
           <div class="bell-wrap">
             <button type="button" class="bell" aria-haspopup="true" [attr.aria-expanded]="open"
                     [attr.aria-label]="'Notifications, ' + total + ' waiting'" (click)="open = !open">
@@ -56,7 +68,7 @@ interface Note { key: string; kind: 'new' | 'payment'; title: string; detail: st
                 </div>
                 @for (n of notes; track n.key) {
                   <a class="note" [class.note-pay]="n.kind === 'payment'"
-                     routerLink="/admin/orders" [queryParams]="{ q: n.ref }" (click)="openNote()">
+                     routerLink="/admin/orders" [queryParams]="{ q: n.ref }" (click)="openNote(n)">
                     <strong>{{ n.title }}</strong>
                     <span>{{ n.detail }}</span>
                   </a>
@@ -75,16 +87,17 @@ interface Note { key: string; kind: 'new' | 'payment'; title: string; detail: st
 })
 export class AdminLayoutComponent {
   auth = inject(AuthService);
+  realtime = inject(RealtimeService);
   private api = inject(ApiService);
   private router = inject(Router);
-  private realtime = inject(RealtimeService);
   private destroyRef = inject(DestroyRef);
-  private readonly key = 'charm_last_seen_order_time';
+  private readonly key = `charm_last_seen_order_time:${this.auth.username}`;
+  private readonly paymentKey = `charm_read_payments:${this.auth.username}`;
 
-  notes: Note[] = [];       // the latest ten
-  total = 0;                // everything waiting, shown on the bell
-  newOrders = 0;            // orders you have not read yet
-  toCheck = 0;              // customers who say they paid, waiting for your check
+  notes: Note[] = [];
+  total = 0;
+  newOrders = 0;
+  toCheck = 0;
   open = false;
   toast = '';
 
@@ -112,7 +125,6 @@ export class AdminLayoutComponent {
     this.realtime.start();
     this.destroyRef.onDestroy(() => this.realtime.stop());
 
-    // a message from the server refreshes at once; a check every minute is the safety net
     merge(timer(0, 60000), this.refresh$.pipe(debounceTime(200))).pipe(
       switchMap(() => forkJoin({
         orders: this.api.list('commands').pipe(catchError(() => of(null))),
@@ -123,66 +135,94 @@ export class AdminLayoutComponent {
       if (!orders) return;
       this.orders = orders;
       this.names = new Map(customers.map((c: any) => [String(c.id), c.fullName]));
-      // the very first time on this browser, older orders are not "new"
       if (this.firstLoad && localStorage.getItem(this.key) === null) this.markSeen();
       this.rebuild(true);
     });
 
     this.realtime.changes$.pipe(
-      filter(r => r.includes('*') || r.includes('commands') || r.includes('customers')),
+      filter(resources => resources.includes('*') || resources.includes('commands') || resources.includes('customers')),
       takeUntilDestroyed()
     ).subscribe(() => this.refresh$.next());
 
-    // opening the Orders page from the menu counts as reading the orders
-    this.router.events.pipe(filter(e => e instanceof NavigationEnd), takeUntilDestroyed()).subscribe(() => {
+    this.router.events.pipe(
+      filter(event => event instanceof NavigationEnd),
+      takeUntilDestroyed()
+    ).subscribe(event => {
+      if ((event as NavigationEnd).url.startsWith('/admin/orders')) {
+        this.markSeen();
+        this.markPaymentsRead(this.orders.filter(o => o.paymentStatus === 'Payment submitted').map(o => String(o.id)));
+      }
       this.rebuild(false);
     });
   }
 
   @HostListener('document:keydown.escape') closeMenu(): void { this.open = false; }
 
-  openNote(): void {
+  openNote(note: Note): void {
+    if (note.kind === 'payment') this.markPaymentsRead([note.key.replace('payment:', '')]);
     this.markSeen();
     this.rebuild(false);
     this.open = false;
   }
 
-  markAllRead(): void { this.openNote(); }
+  markAllRead(): void {
+    this.markSeen();
+    this.markPaymentsRead(this.orders.filter(o => o.paymentStatus === 'Payment submitted').map(o => String(o.id)));
+    this.rebuild(false);
+    this.open = false;
+  }
 
-  /** the time an order was placed, in milliseconds (0 when the API does not send createdAt) */
-  private time(o: any): number { return Date.parse(o.createdAt) || 0; }
+  private time(order: any): number {
+    return Date.parse(order.createdAt ?? order.date ?? '') || 0;
+  }
 
   private lastSeen(): number {
     try { return Number(localStorage.getItem(this.key)) || 0; } catch { return 0; }
   }
 
   private markSeen(): void {
-    const newest = Math.max(0, ...this.orders.map(o => this.time(o)));
-    try { localStorage.setItem(this.key, String(newest)); } catch { /* storage not available */ }
+    const newest = Math.max(0, ...this.orders.map(order => this.time(order)));
+    try { localStorage.setItem(this.key, String(newest)); } catch { /* storage unavailable */ }
+  }
+
+  private readPayments(): Set<string> {
+    try {
+      const value = JSON.parse(localStorage.getItem(this.paymentKey) ?? '[]');
+      return new Set(Array.isArray(value) ? value.map(String) : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  private markPaymentsRead(ids: string[]): void {
+    const read = this.readPayments();
+    ids.forEach(id => read.add(id));
+    try { localStorage.setItem(this.paymentKey, JSON.stringify([...read].slice(-500))); } catch { /* storage unavailable */ }
   }
 
   private rebuild(announce: boolean): void {
-    // clicking the Orders link in the menu marks the orders as read
     const seen = this.lastSeen();
-
+    const readPayments = this.readPayments();
     const all: Note[] = [];
-    for (const o of [...this.orders].sort((a, b) => this.time(b) - this.time(a))) {
-      const who = this.names.get(String(o.customerId)) ?? 'A customer';
-      const detail = `${who} · ${o.referenceNumber} · ${o.model}`;
-      if (o.paymentStatus === 'Payment submitted')
-        all.push({ key: `payment:${o.id}`, kind: 'payment', title: 'Payment to check', detail, ref: o.referenceNumber });
-      else if (this.time(o) > seen)
-        all.push({ key: `new:${o.id}`, kind: 'new', title: 'New order', detail, ref: o.referenceNumber });
+
+    for (const order of [...this.orders].sort((a, b) => this.time(b) - this.time(a))) {
+      const who = this.names.get(String(order.customerId)) ?? 'A customer';
+      const detail = `${who} · ${order.referenceNumber} · ${order.model}`;
+      if (order.paymentStatus === 'Payment submitted' && !readPayments.has(String(order.id))) {
+        all.push({ key: `payment:${order.id}`, kind: 'payment', title: 'Payment to check', detail, ref: order.referenceNumber });
+      } else if (this.time(order) > seen) {
+        all.push({ key: `new:${order.id}`, kind: 'new', title: 'New order', detail, ref: order.referenceNumber });
+      }
     }
 
     this.total = all.length;
     this.notes = all.slice(0, 10);
-    this.toCheck = all.filter(n => n.kind === 'payment').length;
-    this.newOrders = this.orders.filter(o => this.time(o) > seen).length;
+    this.toCheck = this.orders.filter(order => order.paymentStatus === 'Payment submitted').length;
+    this.newOrders = this.orders.filter(order => this.time(order) > seen).length;
 
     if (announce) {
-      const fresh = all.filter(n => !this.known.has(n.key));
-      this.known = new Set(all.map(n => n.key));
+      const fresh = all.filter(note => !this.known.has(note.key));
+      this.known = new Set(all.map(note => note.key));
       if (!this.firstLoad && fresh.length) this.say(`${fresh[0].title}: ${fresh[0].detail}`);
       this.firstLoad = false;
     }

@@ -17,6 +17,7 @@ public class ProductStoreContext(DbContextOptions<ProductStoreContext> options)
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Command> Commands => Set<Command>();
     public DbSet<CommandItem> CommandItems => Set<CommandItem>();
+    public DbSet<StoredImage> StoredImages => Set<StoredImage>();
     public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
 
 protected override void OnModelCreating(ModelBuilder b)
@@ -26,6 +27,20 @@ protected override void OnModelCreating(ModelBuilder b)
     {
         e.Property(u => u.Username).HasMaxLength(100);
         e.HasIndex(u => u.Username).IsUnique();
+    });
+    b.Entity<Command>(e =>
+    {
+        e.HasIndex(c => c.ReferenceNumber).IsUnique();
+        e.HasIndex(c => c.CreatedAt);
+        e.HasIndex(c => c.PaymentReference)
+            .IsUnique()
+            .HasFilter("\"PaymentReference\" IS NOT NULL AND \"PaymentReference\" <> ''");
+    });
+    b.Entity<StoredImage>(e =>
+    {
+        e.Property(i => i.FileName).HasMaxLength(128);
+        e.Property(i => i.ContentType).HasMaxLength(50);
+        e.HasKey(i => i.FileName);
     });
 }
 }

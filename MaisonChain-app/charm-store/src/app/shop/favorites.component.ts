@@ -4,6 +4,7 @@ import { ApiService } from '../core/api.service';
 import { CartService } from '../core/cart.service';
 import { FavoritesService } from '../core/favorites.service';
 import { KmfPipe } from '../core/kmf.pipe';
+import { ImageFallbackDirective } from '../core/image-fallback.directive';
 
 interface Product {
   id: string;
@@ -18,7 +19,7 @@ interface Product {
 @Component({
   selector: 'app-favorites',
   standalone: true,
-  imports: [KmfPipe, RouterLink],
+  imports: [KmfPipe, RouterLink, ImageFallbackDirective],
   template: `
     <header class="shop-head">
       <a class="brand" routerLink="/">Beauty & Shine</a>
@@ -42,7 +43,7 @@ interface Product {
         <div class="grid">
           @for (p of items; track p.id) {
             <article class="product">
-              <img [src]="api.img(p.imageUrl)" [alt]="p.model" loading="lazy">
+              <img [src]="api.img(p.imageUrl)" [alt]="p.model" loading="lazy" appImageFallback>
               <button type="button" class="heart on" aria-pressed="true"
                       [attr.aria-label]="'Remove ' + p.model + ' from favorites'" (click)="favs.toggle(p.id)">♥</button>
               <h2>{{ p.model }}</h2>

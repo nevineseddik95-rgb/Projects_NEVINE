@@ -1,3 +1,12 @@
+FROM node:22-alpine AS frontend
+WORKDIR /angular
+
+COPY MaisonChain-app/charm-store/package*.json ./
+RUN npm ci
+
+COPY MaisonChain-app/charm-store/ ./
+RUN npm run build -- --configuration production
+
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
@@ -5,6 +14,10 @@ COPY ProductStore/ProductStore.Api/*.csproj ./ProductStore/ProductStore.Api/
 RUN dotnet restore ./ProductStore/ProductStore.Api/productStore.Api.csproj
 
 COPY . .
+
+RUN rm -rf ./ProductStore/ProductStore.Api/wwwroot
+COPY --from=frontend /angular/dist/charm-store/browser/ ./ProductStore/ProductStore.Api/wwwroot/
+COPY ProductStore/ProductStore.Api/wwwroot/uploads/ ./ProductStore/ProductStore.Api/wwwroot/uploads/
 
 RUN dotnet publish ./ProductStore/ProductStore.Api/productStore.Api.csproj -c Release -o /app/publish
 

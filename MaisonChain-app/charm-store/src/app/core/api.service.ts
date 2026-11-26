@@ -23,7 +23,9 @@ export class ApiService {
 
   /** Turns a stored image path (e.g. "/uploads/a.jpg") into a loadable URL. */
   img(path?: string | null): string {
-    if (!path) return 'placeholder.svg';
-    return /^(https?:|data:)/.test(path) ? path : environment.filesUrl + path;
+    const placeholder = `${environment.filesUrl}/placeholder.svg`;
+    if (!path) return placeholder;
+    if (/^(https?:|data:image\/(?:jpeg|png|webp);base64,)/i.test(path)) return path;
+    return environment.filesUrl + (path.startsWith('/') ? path : `/${path}`);
   }
 }

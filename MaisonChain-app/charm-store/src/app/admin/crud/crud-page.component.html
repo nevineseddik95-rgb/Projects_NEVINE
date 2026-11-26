@@ -13,6 +13,13 @@
 
 @if (error && !editing) { <p class="alert" role="alert">{{ error }}</p> }
 
+@if (cfg.endpoint === 'commands') {
+  <p class="workflow-hint">
+    Workflow: Pending → Processing → Shipped → Delivered. Confirm the deposit before processing or shipping;
+    delivery requires payment in full. Delivered and cancelled orders cannot be reopened.
+  </p>
+}
+
 <section class="filters" aria-label="Filters">
   @for (f of filterFields; track f.key) {
     <div class="filter">
@@ -68,7 +75,7 @@
                 [class.nowrap]="f.type === 'date' || f.type === 'datetime' || f.key === 'referenceNumber' || f.key === 'productId' || f.key === 'model'"
                 [class.ref]="f.key === 'referenceNumber'">
               @switch (f.type) {
-                @case ('image') { <img class="thumb" [src]="img(r[f.key])" alt=""> }
+                @case ('image') { <img class="thumb" [src]="img(r[f.key])" alt="" appImageFallback> }
                 @case ('color') { <span class="swatch" [style.background]="r[f.key]"></span> {{ r[f.key] }} }
                 @case ('money') { {{ r[f.key] | kmf }} }
                 @case ('date') { {{ r[f.key] | date: 'mediumDate' }} }
@@ -85,7 +92,10 @@
             @if (canEdit) {
               @for (a of cfg.rowActions ?? []; track a.path) {
                 @if (!a.show || a.show(r)) {
-                  <button class="btn btn-primary" type="button" (click)="runAction(a, r)">{{ a.label }}</button>
+                  <button class="btn btn-primary" type="button" (click)="runAction(a, r)"
+                          [disabled]="actionBusy === r.id + ':' + a.path">
+                    {{ actionBusy === r.id + ':' + a.path ? 'Working…' : a.label }}
+                  </button>
                 }
               }
             }
@@ -126,7 +136,7 @@
               </select>
             } @else if (f.type === 'image') {
               <div class="image-field">
-                <img class="preview" [src]="img(editing[f.key])" alt="Preview">
+                <img class="preview" [src]="img(editing[f.key])" alt="Preview" appImageFallback>
                 <div>
                   <input [id]="f.key" type="file" accept="image/jpeg,image/png,image/webp" (change)="onFile($event, f)">
                   @if (uploading) { <p class="muted">Uploading…</p> }

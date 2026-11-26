@@ -18,9 +18,10 @@ export interface Field {
 
 export interface RowAction {
   label: string;
-  path: string;                       // runs POST /api/<endpoint>/<id>/<path>
-  confirm?: string;                   // question asked before it runs
-  show?: (row: any) => boolean;       // when the button appears
+  path: string;
+  confirm?: string;
+  show?: (row: any) => boolean;
+  body?: (row: any) => any;
 }
 
 export interface CrudConfig {

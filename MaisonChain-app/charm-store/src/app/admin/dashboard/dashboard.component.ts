@@ -7,12 +7,13 @@ import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { KmfPipe } from '../../core/kmf.pipe';
+import { ImageFallbackDirective } from '../../core/image-fallback.directive';
 import { ORDER_STATUSES } from '../../core/models';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [KmfPipe, DatePipe, RouterLink],
+  imports: [KmfPipe, DatePipe, RouterLink, ImageFallbackDirective],
   template: `
     <header class="page-head"><div><h1>Dashboard</h1><p class="muted">Orders, payments and customers at a glance</p></div></header>
     @if (errors.length) {
@@ -55,7 +56,7 @@ import { ORDER_STATUSES } from '../../core/models';
           <tbody>
             @for (o of latest; track o.id) {
               <tr>
-                <td><img class="thumb" [src]="api.img(o.imageUrl)" alt=""></td>
+                <td><img class="thumb" [src]="api.img(o.imageUrl)" alt="" appImageFallback></td>
                 <td>{{ o.referenceNumber }}</td>
                 <td>{{ customerName(o.customerId) }}</td>
                 <td>{{ o.model }}</td>
@@ -106,7 +107,7 @@ private reload(): void {
   get revenue() { return this.commands.filter(c => c.status !== 'Cancelled').reduce((s, c) => s + (+c.total || 0), 0); }
   get latest() {
     return [...this.commands]
-      .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0))
+      .sort((a, b) => (Date.parse(b.createdAt ?? b.date) || 0) - (Date.parse(a.createdAt ?? a.date) || 0))
       .slice(0, 6);
   }
   get recentVisitors() {

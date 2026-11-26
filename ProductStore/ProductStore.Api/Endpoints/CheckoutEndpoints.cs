@@ -18,8 +18,8 @@ public class CheckoutItem
 public class CheckoutRequest
 {
     public string FullName { get; set; } = "";
-    public string? Email { get; set; }                 // optional
-    public string? Phone { get; set; }                 // required: for the text message
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
     public string DeliveryAddress { get; set; } = "";
     public decimal DepositAmount { get; set; }
     public string PaymentMethod { get; set; } = "";
@@ -41,8 +41,12 @@ public static class CheckoutEndpoints
 
     public static void MapCheckoutEndpoints(this WebApplication app)
     {
-        // public: customers order without logging in
-        app.MapPost("/checkout", async (CheckoutRequest req, ProductStoreContext db, IConfiguration config, IEmailSender email, ISmsSender sms) =>
+        app.MapPost("/checkout", async (
+            CheckoutRequest req,
+            ProductStoreContext db,
+            IConfiguration config,
+            EmailNotificationQueue emailQueue,
+            CancellationToken cancellationToken) =>
         {
             var name = (req.FullName ?? "").Trim();
             var phone = PhoneNumber.Normalize(req.Phone);
@@ -61,13 +65,12 @@ public static class CheckoutEndpoints
             if (req.Items.Any(i => i.Quantity < 1 || i.Quantity > MaxQuantity))
                 return Results.BadRequest($"Each quantity must be between 1 and {MaxQuantity}.");
 
-            // the prices come from the database, never from the browser
             var wanted = req.Items
                 .GroupBy(i => i.ProductId)
                 .Select(g => new { ProductId = g.Key, Quantity = Math.Min(MaxQuantity, g.Sum(i => i.Quantity)) })
                 .ToList();
             var ids = wanted.Select(w => w.ProductId).ToList();
-            var products = await db.Products.Where(p => ids.Contains(p.Id)).ToListAsync();
+            var products = await db.Products.Where(p => ids.Contains(p.Id)).ToListAsync(cancellationToken);
             if (products.Count != ids.Count)
                 return Results.BadRequest("One of the products in your cart is no longer available.");
 
@@ -75,35 +78,39 @@ public static class CheckoutEndpoints
                 .Select(w => (Item: products.First(p => p.Id == w.ProductId), Qty: w.Quantity))
                 .ToList();
             var total = lines.Sum(l => l.Item.Price * l.Qty);
-
-            var minDeposit = Math.Ceiling(total * 0.40m);       // 40%, whole francs, rounded up
+            var minDeposit = Math.Ceiling(total * 0.40m);
             var deposit = Math.Round(req.DepositAmount, 0, MidpointRounding.AwayFromZero);
             if (deposit < minDeposit)
                 return Results.BadRequest($"The deposit must be at least {minDeposit:0} KMF, which is 40% of the total.");
             if (deposit > total)
                 return Results.BadRequest("The deposit cannot be more than the total.");
 
-            // find the customer by email when one is given, otherwise by phone
             var customer = emailAddress.Length > 0
-                ? await db.Customers.FirstOrDefaultAsync(c => c.Email.ToLower() == emailAddress)
+                ? await db.Customers.FirstOrDefaultAsync(c => c.Email.ToLower() == emailAddress, cancellationToken)
                 : null;
-            customer ??= await db.Customers.FirstOrDefaultAsync(c => c.Phone == phone);
+            customer ??= await db.Customers.FirstOrDefaultAsync(c => c.Phone == phone, cancellationToken);
 
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             if (customer is null)
             {
-                customer = new Customer { FullName = name, Email = emailAddress, Phone = phone, Address = req.DeliveryAddress.Trim() };
+                customer = new Customer
+                {
+                    FullName = name,
+                    Email = emailAddress,
+                    Phone = phone,
+                    Address = req.DeliveryAddress.Trim()
+                };
                 db.Customers.Add(customer);
-                await db.SaveChangesAsync();
+                await db.SaveChangesAsync(cancellationToken);
             }
             else if (emailAddress.Length > 0 && string.IsNullOrEmpty(customer.Email))
             {
-                customer.Email = emailAddress;      // keep an email that is given later
-                await db.SaveChangesAsync();
+                customer.Email = emailAddress;
+                await db.SaveChangesAsync(cancellationToken);
             }
 
             var first = lines[0].Item;
             var summary = string.Join(", ", lines.Select(l => l.Qty > 1 ? $"{l.Item.Model} x{l.Qty}" : l.Item.Model));
-
             var order = new Command
             {
                 ReferenceNumber = $"CMD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}",
@@ -123,31 +130,30 @@ public static class CheckoutEndpoints
                 PaymentMethod = req.PaymentMethod
             };
             db.Commands.Add(order);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(cancellationToken);
 
             db.CommandItems.AddRange(lines.Select(l => new CommandItem
             {
-                CommandId = order.Id, ProductId = l.Item.Id, Model = l.Item.Model,
-                UnitPrice = l.Item.Price, Quantity = l.Qty
+                CommandId = order.Id,
+                ProductId = l.Item.Id,
+                Model = l.Item.Model,
+                UnitPrice = l.Item.Price,
+                Quantity = l.Qty
             }));
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
 
             var instructions = config[$"Payment:Instructions:{req.PaymentMethod}"] ?? "";
             var emailLines = lines.Select(l => (l.Item.Model, l.Qty, l.Item.Price)).ToList();
+            var customerEmailQueued = emailAddress.Length > 0 && emailQueue.TryEnqueue(new EmailNotification(
+                emailAddress,
+                name,
+                $"Your order {order.ReferenceNumber} - Beauty & Shine",
+                BuildConfirmationEmail(order, name, instructions, emailLines)));
 
-            // a failed email or text message never cancels the order
-            // var emailSent = emailAddress.Length > 0 && await email.SendAsync(
-            //     emailAddress, name,
-            //     $"Your order {order.ReferenceNumber} - Charm Store",
-            //     BuildConfirmationEmail(order, name, instructions, emailLines));
-
-            // // plain ASCII keeps it in a single text message
-            // var smsSent = await sms.SendAsync(phone,
-            //     $"Charm Store: order {order.ReferenceNumber} received. Pay the {Money(deposit)} deposit with {req.PaymentMethod}. Total {Money(total)}. Keep this reference.");
-
-            // await NotifyAdminAsync(email, config,
-            //     $"New order {order.ReferenceNumber} - {summary}",
-            //     BuildAdminNewOrderEmail(order, name, emailAddress.Length > 0 ? emailAddress : "(not given)", phone));
+            NotifyAdmin(emailQueue, config,
+                $"New order {order.ReferenceNumber} - {summary}",
+                BuildAdminNewOrderEmail(order, name, emailAddress.Length > 0 ? emailAddress : "(not given)", phone));
 
             return Results.Ok(new
             {
@@ -158,58 +164,75 @@ public static class CheckoutEndpoints
                 balance = total - deposit,
                 method = req.PaymentMethod,
                 instructions,
-                emailSent=false,
-                smsSent=false,
+                emailQueued = customerEmailQueued,
+                smsSent = false,
                 phone
             });
         }).RequireRateLimiting("checkout");
 
-        // the customer sends the transaction ID after paying
-        app.MapPost("/checkout/{reference}/payment", async (string reference, PaymentNotice notice, ProductStoreContext db, IConfiguration config, IEmailSender email) =>
+        app.MapPost("/checkout/{reference}/payment", async (
+            string reference,
+            PaymentNotice notice,
+            ProductStoreContext db,
+            IConfiguration config,
+            EmailNotificationQueue emailQueue,
+            CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrWhiteSpace(notice.TransactionId))
-                return Results.BadRequest("Enter the transaction ID from your payment message.");
+            var transactionId = (notice.TransactionId ?? "").Trim();
+            if (transactionId.Length is < 3 or > 100)
+                return Results.BadRequest("Enter a transaction ID between 3 and 100 characters.");
 
-            var order = await db.Commands.FirstOrDefaultAsync(c => c.ReferenceNumber == reference);
-            var customer = order is null ? null : await db.Customers.FindAsync(order.CustomerId);
+            var order = await db.Commands.FirstOrDefaultAsync(c => c.ReferenceNumber == reference, cancellationToken);
+            var customer = order is null ? null : await db.Customers.FindAsync([order.CustomerId], cancellationToken);
             var emailAddress = (notice.Email ?? "").Trim().ToLowerInvariant();
             var phone = PhoneNumber.Normalize(notice.Phone);
-
-            // the customer proves it is theirs with the email or the phone used for the order
             var matches = customer is not null &&
                 ((emailAddress.Length > 0 && customer.Email.ToLower() == emailAddress) ||
                  (phone is not null && customer.Phone == phone));
 
-            // same answer whether the reference or the contact is wrong, so references cannot be guessed
             if (order is null || customer is null || !matches)
                 return Results.NotFound();
+
+            if (order.PaymentStatus == "Payment submitted" &&
+                string.Equals(order.PaymentReference, transactionId, StringComparison.OrdinalIgnoreCase))
+                return Results.Ok(new { received = true, duplicate = true });
             if (order.PaymentStatus != "Unpaid")
                 return Results.BadRequest("This payment is already being checked or confirmed.");
+            if (await db.Commands.AnyAsync(c => c.Id != order.Id && c.PaymentReference == transactionId, cancellationToken))
+                return Results.Conflict("This transaction ID is already linked to another order. Check it and try again.");
 
-            order.PaymentReference = notice.TransactionId.Trim();
+            order.PaymentReference = transactionId;
             order.PaymentStatus = "Payment submitted";
-            await db.SaveChangesAsync();
+            order.UpdatedAt = DateTime.UtcNow;
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict("This transaction ID is already linked to another order. Check it and try again.");
+            }
 
-            await NotifyAdminAsync(email, config,
+            NotifyAdmin(emailQueue, config,
                 $"Payment submitted for {order.ReferenceNumber}",
                 $"<p>{WebUtility.HtmlEncode(customer.FullName)} says they paid the deposit for order <strong>{WebUtility.HtmlEncode(order.ReferenceNumber)}</strong> ({Money(order.DepositAmount)}).</p>" +
                 $"<p>Transaction ID: <strong>{WebUtility.HtmlEncode(order.PaymentReference)}</strong></p>" +
                 "<p>Check it in your MVola statement, then press <em>Confirm deposit</em> on the admin Orders page.</p>");
 
-            return Results.Ok();
+            return Results.Ok(new { received = true, duplicate = false });
         }).RequireRateLimiting("checkout");
     }
+
     private static string Money(decimal v) =>
         v.ToString("N0", CultureInfo.InvariantCulture).Replace(',', ' ') + " KMF";
 
-    private static async Task NotifyAdminAsync(IEmailSender email, IConfiguration config, string subject, string htmlBody)
+    private static void NotifyAdmin(EmailNotificationQueue queue, IConfiguration config, string subject, string htmlBody)
     {
         var admin = config["Notifications:AdminEmail"];
-        if (string.IsNullOrWhiteSpace(admin)) return;
-        await email.SendAsync(admin, "Beauty & Shine admin", subject, htmlBody);
+        if (!string.IsNullOrWhiteSpace(admin))
+            queue.TryEnqueue(new EmailNotification(admin, "Beauty & Shine admin", subject, htmlBody));
     }
 
-    // every value typed by the customer is HTML-encoded before it goes into an email
     private static string BuildConfirmationEmail(Command o, string name, string instructions,
         List<(string Model, int Qty, decimal Unit)> lines)
     {
@@ -217,7 +240,6 @@ public static class CheckoutEndpoints
         var how = string.IsNullOrWhiteSpace(instructions)
             ? "We will contact you with the payment details."
             : E(instructions);
-
         var rows = string.Join("", lines.Select(l =>
             $"<tr><td style=\"padding:6px 0;border-bottom:1px solid #ebe0ec\">{E(l.Model)} x {l.Qty}</td><td style=\"padding:6px 0;border-bottom:1px solid #ebe0ec;text-align:right\">{Money(l.Unit * l.Qty)}</td></tr>"));
 
@@ -226,19 +248,16 @@ public static class CheckoutEndpoints
           <h2 style="color:#7d4e7e;margin-bottom:4px">Thank you for your order, {E(name)}</h2>
           <p>We have received your order. Your reference number is:</p>
           <p style="font-size:22px;font-weight:bold;letter-spacing:1px;margin:8px 0 16px">{E(o.ReferenceNumber)}</p>
-
           <table style="width:100%;border-collapse:collapse">
             {rows}
             <tr><td style="padding:6px 0;border-bottom:1px solid #ebe0ec"><strong>Total</strong></td><td style="padding:6px 0;border-bottom:1px solid #ebe0ec;text-align:right"><strong>{Money(o.Total)}</strong></td></tr>
             <tr><td style="padding:6px 0;border-bottom:1px solid #ebe0ec"><strong>Deposit to pay now</strong></td><td style="padding:6px 0;border-bottom:1px solid #ebe0ec;text-align:right"><strong>{Money(o.DepositAmount)}</strong></td></tr>
             <tr><td style="padding:6px 0;border-bottom:1px solid #ebe0ec">Balance later</td><td style="padding:6px 0;border-bottom:1px solid #ebe0ec;text-align:right">{Money(o.Total - o.DepositAmount)}</td></tr>
-            <tr><td style="padding:6px 0">Delivery address</td><td style="padding:6px 0;text-align:right">{E(o.DeliveryAddress)}</td></tr>
+            <tr><td style="padding:6px 0">Delivery address</td><td style="padding:6px 0;border-bottom:1px solid #ebe0ec;text-align:right">{E(o.DeliveryAddress)}</td></tr>
           </table>
-
           <h3 style="color:#7d4e7e;margin-top:24px">How to pay your deposit with {E(o.PaymentMethod)}</h3>
           <p>{how}</p>
-          <p>After you pay, keep your payment confirmation message and enter its transaction ID on the confirmation page of our website. We confirm your order when we receive the deposit.</p>
-
+          <p>After you pay, keep your payment confirmation message and enter its transaction ID on the confirmation page of our website.</p>
           <p style="color:#75677a;font-size:13px;margin-top:24px">Please keep this email. You will need the reference number if you contact us.</p>
         </div>
         """;

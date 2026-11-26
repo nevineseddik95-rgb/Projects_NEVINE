@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ProductStore.Api.Models;
+using ProductStore.Api.Services;
 
 namespace productStore.Api.Data;
 
@@ -11,6 +12,40 @@ public static class DataExtensions
         var dbContext = scope.ServiceProvider
                         .GetRequiredService<ProductStoreContext>();
         dbContext.Database.Migrate();
+    }
+
+    public static async Task SeedStoredImagesAsync(this WebApplication app)
+    {
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ProductStoreContext>();
+        var env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
+        var folder = Path.Combine(env.ContentRootPath, "wwwroot", "uploads");
+        if (!Directory.Exists(folder)) return;
+
+        var existing = await db.StoredImages.Select(i => i.FileName).ToListAsync();
+        var known = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var additions = new List<StoredImage>();
+        foreach (var path in Directory.EnumerateFiles(folder))
+        {
+            var fileName = Path.GetFileName(path);
+            if (known.Contains(fileName)) continue;
+            var data = await File.ReadAllBytesAsync(path);
+            var contentType = ImageFiles.DetectContentType(data, fileName);
+            if (contentType is null) continue;
+            additions.Add(new StoredImage
+            {
+                FileName = fileName,
+                ContentType = contentType,
+                Data = data,
+                CreatedAt = File.GetCreationTimeUtc(path)
+            });
+        }
+        if (additions.Count > 0)
+        {
+            db.StoredImages.AddRange(additions);
+            await db.SaveChangesAsync();
+            app.Logger.LogInformation("Stored {Count} existing upload images in the database.", additions.Count);
+        }
     }
 
     public static void AddProductStoreDb(this WebApplicationBuilder builder)

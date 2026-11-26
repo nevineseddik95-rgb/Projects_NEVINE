@@ -3,10 +3,11 @@ import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { debounceTime } from 'rxjs';
+import { debounceTime, finalize } from 'rxjs';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { KmfPipe } from '../../core/kmf.pipe';
+import { ImageFallbackDirective } from '../../core/image-fallback.directive';
 import { RealtimeService } from '../../core/realtime.service';
 import { CrudConfig, Field, Option, RowAction } from '../../core/models';
 
@@ -14,7 +15,7 @@ import { CrudConfig, Field, Option, RowAction } from '../../core/models';
 @Component({
   selector: 'app-crud-page',
   standalone: true,
-  imports: [FormsModule, DatePipe, KmfPipe],
+  imports: [FormsModule, DatePipe, KmfPipe, ImageFallbackDirective],
   templateUrl: './crud-page.component.html'
 })
 export class CrudPageComponent implements OnInit {
@@ -34,6 +35,7 @@ export class CrudPageComponent implements OnInit {
   isNew = false;
   saving = false;
   uploading = false;
+  actionBusy = '';
   error = '';
 
   // filters and sorting
@@ -50,6 +52,10 @@ export class CrudPageComponent implements OnInit {
     this.load();
     this.clearFilters();
     this.loadLookups();
+    if (this.cfg.endpoint === 'commands') {
+      this.sortKey = 'createdAt';
+      this.sortDir = 'desc';
+    }
 
     // a link from the notification bell opens the list already filtered to that order
     this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(p => {
@@ -233,12 +239,18 @@ export class CrudPageComponent implements OnInit {
   }
 
   /** Runs an extra row button, such as "Confirm deposit": POST /api/<endpoint>/<id>/<path> */
-  runAction(a: RowAction, row: any): void {
-    if (!this.canEdit) return;
-    if (a.confirm && !confirm(a.confirm)) return;
-    this.api.create(`${this.cfg.endpoint}/${row.id}/${a.path}`, {}).subscribe({
+  runAction(action: RowAction, row: any): void {
+    if (!this.canEdit || this.actionBusy) return;
+    if (action.confirm && !confirm(action.confirm)) return;
+    this.actionBusy = `${row.id}:${action.path}`;
+    this.error = '';
+    this.api.create(`${this.cfg.endpoint}/${row.id}/${action.path}`, action.body?.(row) ?? {}).pipe(
+      finalize(() => (this.actionBusy = ''))
+    ).subscribe({
       next: () => this.load(),
-      error: e => (this.error = typeof e.error === 'string' && e.error ? e.error : 'The action failed. Try again.')
+      error: error => (this.error = typeof error.error === 'string' && error.error
+        ? error.error
+        : 'The action failed. Try again.')
     });
   }
 

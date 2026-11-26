@@ -3,11 +3,12 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { CartService, toCartProduct } from '../core/cart.service';
 import { KmfPipe } from '../core/kmf.pipe';
+import { ImageFallbackDirective } from '../core/image-fallback.directive';
 
 @Component({
   selector: 'app-cart',
   standalone: true,
-  imports: [KmfPipe, RouterLink],
+  imports: [KmfPipe, RouterLink, ImageFallbackDirective],
   template: `
     <header class="shop-head">
       <a class="brand" routerLink="/">Beauty & Shine</a>
@@ -26,7 +27,7 @@ import { KmfPipe } from '../core/kmf.pipe';
         <ul class="cart-lines">
           @for (l of cart.lines(); track l.productId) {
             <li class="cart-line">
-              <img class="thumb" [src]="api.img(l.imageUrl)" alt="">
+              <img class="thumb" [src]="api.img(l.imageUrl)" alt="" appImageFallback>
               <div class="cart-info">
                 <strong>{{ l.model }}</strong>
                 <span class="muted">{{ l.price | kmf }} each</span>

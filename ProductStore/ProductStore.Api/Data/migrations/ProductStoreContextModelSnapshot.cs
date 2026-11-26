@@ -163,20 +163,52 @@ namespace productStore.Api.Data.migrations
                     b.ToTable("Sizes");
                 });
 
+            modelBuilder.Entity("ProductStore.Api.Models.StoredImage", b =>
+                {
+                    b.Property<string>("FileName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.HasKey("FileName");
+
+                    b.ToTable("StoredImages");
+                });
+
             modelBuilder.Entity("productStore.Api.Models.Command", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("ColorId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uuid");
 
                     b.Property<DateOnly>("Date")
                         .HasColumnType("date");
+
+                    b.Property<DateTime?>("DeliveredAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("DeliveryAddress")
                         .IsRequired()
@@ -222,10 +254,31 @@ namespace productStore.Api.Data.migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("StatusNote")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("StatusUpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<decimal>("Total")
                         .HasColumnType("numeric");
 
+                    b.Property<string>("TrackingNumber")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("PaymentReference")
+                        .IsUnique()
+                        .HasFilter("\"PaymentReference\" IS NOT NULL AND \"PaymentReference\" <> ''");
+
+                    b.HasIndex("ReferenceNumber")
+                        .IsUnique();
 
                     b.ToTable("Commands");
                 });

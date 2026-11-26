@@ -1,8 +1,10 @@
-# Angular build artifacts (keep the SOURCE, ignore generated)
-MaisonChain-app/node_modules/
-MaisonChain-app/dist/
-MaisonChain-app/.angular/
-
-# .NET build artifacts
+**/node_modules/
+**/dist/
+**/.angular/
 **/bin/
 **/obj/
+.git/
+**/*.db-shm
+**/*.db-wal
+.vs/
+.vscode/

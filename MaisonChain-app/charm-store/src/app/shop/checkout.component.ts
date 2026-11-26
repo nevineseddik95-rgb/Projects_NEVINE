@@ -1,9 +1,22 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { finalize, timeout } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { CartService, toCartProduct } from '../core/cart.service';
 import { KmfPipe } from '../core/kmf.pipe';
+
+interface CheckoutResult {
+  reference: string;
+  items: { model: string; quantity: number; lineTotal: number }[];
+  total: number;
+  deposit: number;
+  balance: number;
+  method: string;
+  instructions: string;
+  emailQueued: boolean;
+  phone: string;
+}
 
 @Component({
   selector: 'app-checkout',
@@ -20,8 +33,11 @@ import { KmfPipe } from '../core/kmf.pipe';
         <h1>Order received</h1>
         <section class="summary">
           <p class="notice">Your order reference is <strong>{{ done.reference }}</strong>. Keep it.</p>
-       @if (done.smsSent) { <p class="hint">A text message with this reference was sent to {{ done.phone }}.</p> }
-       @if (done.emailSent) { <p class="hint">A confirmation email with this reference was sent to {{ email }}.</p> }
+          @if (done.emailQueued) {
+            <p class="hint">Your confirmation email is queued and will be sent shortly.</p>
+          } @else if (email) {
+            <p class="hint">Your order is saved, but the confirmation email could not be queued.</p>
+          }
           @for (i of done.items; track i.model) {
             <div class="row"><span>{{ i.model }} × {{ i.quantity }}</span><span>{{ i.lineTotal | kmf }}</span></div>
           }
@@ -39,10 +55,14 @@ import { KmfPipe } from '../core/kmf.pipe';
             <form #pf="ngForm" (ngSubmit)="sendNotice()">
               <div class="field">
                 <label for="txid">Transaction ID from your payment message</label>
-                <input id="txid" name="txid" [(ngModel)]="transactionId" required>
+                <input id="txid" name="txid" [(ngModel)]="transactionId" required minlength="3" maxlength="100"
+                       autocomplete="off" placeholder="Example: MP2406.1234.ABCD">
+                <p class="hint">Copy the full reference from your MVola confirmation message.</p>
               </div>
               @if (noticeError) { <p class="alert" role="alert">{{ noticeError }}</p> }
-              <button class="btn btn-primary" type="submit" [disabled]="pf.invalid || busy">I have paid</button>
+              <button class="btn btn-primary" type="submit" [disabled]="pf.invalid || busy">
+                {{ busy ? 'Submitting transaction…' : 'I have paid' }}
+              </button>
             </form>
           }
           <p><a class="btn btn-ghost" routerLink="/">Continue shopping</a></p>
@@ -68,10 +88,10 @@ import { KmfPipe } from '../core/kmf.pipe';
             <input id="fullName" name="fullName" autocomplete="name" [(ngModel)]="fullName" required>
           </div>
           <div class="field">
-  <label for="email">Email (optional)</label>
-  <input id="email" name="email" type="email" autocomplete="email" [(ngModel)]="email">
-  <p class="hint">We send your confirmation by text message, and by email too if you add an address.</p>
-</div>
+            <label for="email">Email (optional)</label>
+            <input id="email" name="email" type="email" autocomplete="email" [(ngModel)]="email">
+            <p class="hint">Add an email to receive your order confirmation and status updates.</p>
+          </div>
           <div class="field">
             <label for="phone">Phone</label>
             <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+269 321 2345" [(ngModel)]="phone" required>
@@ -104,11 +124,15 @@ export class CheckoutComponent implements OnInit {
   api = inject(ApiService);
   cart = inject(CartService);
 
-  fullName = ''; email = ''; phone = ''; address = ''; method = 'MVola';
+  fullName = '';
+  email = '';
+  phone = '';
+  address = '';
+  method = 'MVola';
   deposit: number | null = null;
   busy = false;
   error = '';
-  done: any = null;
+  done: CheckoutResult | null = null;
 
   transactionId = '';
   noticeSent = false;
@@ -116,55 +140,83 @@ export class CheckoutComponent implements OnInit {
 
   ngOnInit(): void {
     this.deposit = this.minDeposit;
-    // use today's names and prices, and drop products that were removed from the shop
     this.api.list('products').subscribe({
-      next: rows => { this.cart.sync(rows.map(toCartProduct)); this.deposit = this.minDeposit; }
+      next: rows => {
+        this.cart.sync(rows.map(toCartProduct));
+        this.deposit = this.minDeposit;
+      }
     });
   }
 
-  /** 40% of the total, rounded up to a whole franc (the API uses the same rule). */
   get minDeposit(): number {
     return Math.ceil((Math.round(this.cart.total() * 100) * 40) / 10000);
   }
+
   get balance(): number {
     return Math.max(0, this.cart.total() - (this.deposit ?? 0));
   }
+
   get depositOk(): boolean {
     return this.deposit != null && this.cart.total() > 0 &&
       this.deposit >= this.minDeposit && this.deposit <= this.cart.total();
   }
 
   submit(): void {
-    if (!this.depositOk) return;
+    if (!this.depositOk || this.busy) return;
     this.busy = true;
     this.error = '';
     this.api.create('checkout', {
-      fullName: this.fullName, email: this.email, phone: this.phone,
-      deliveryAddress: this.address, depositAmount: this.deposit, paymentMethod: this.method,
+      fullName: this.fullName,
+      email: this.email,
+      phone: this.phone,
+      deliveryAddress: this.address,
+      depositAmount: this.deposit,
+      paymentMethod: this.method,
       items: this.cart.lines().map(l => ({ productId: l.productId, quantity: l.quantity }))
-    }).subscribe({
-      next: r => { this.done = r; this.busy = false; this.cart.clear(); },
-      error: e => {
-        this.busy = false;
-        this.error = typeof e.error === 'string' && e.error
-          ? e.error
-          : 'The order could not be placed. Check your details and try again.';
+    }).pipe(
+      timeout(30000),
+      finalize(() => (this.busy = false))
+    ).subscribe({
+      next: result => {
+        this.done = result as CheckoutResult;
+        this.cart.clear();
+      },
+      error: error => {
+        this.error = typeof error.error === 'string' && error.error
+          ? error.error
+          : error.name === 'TimeoutError'
+            ? 'The server took too long to respond. Your order may already be saved; check your connection before trying again.'
+            : 'The order could not be placed. Check your details and try again.';
       }
     });
   }
 
   sendNotice(): void {
+    if (!this.done || this.busy) return;
+    const transactionId = this.transactionId.trim();
+    if (transactionId.length < 3 || transactionId.length > 100) {
+      this.noticeError = 'Enter the complete transaction ID from your payment message.';
+      return;
+    }
+
     this.busy = true;
     this.noticeError = '';
-    this.api.create(`checkout/${this.done.reference}/payment`, { email: this.email, phone: this.phone, transactionId: this.transactionId })
-      .subscribe({
-        next: () => { this.noticeSent = true; this.busy = false; },
-        error: e => {
-          this.busy = false;
-          this.noticeError = typeof e.error === 'string' && e.error
-            ? e.error
+    this.api.create(`checkout/${this.done.reference}/payment`, {
+      email: this.email,
+      phone: this.phone,
+      transactionId
+    }).pipe(
+      timeout(30000),
+      finalize(() => (this.busy = false))
+    ).subscribe({
+      next: () => (this.noticeSent = true),
+      error: error => {
+        this.noticeError = typeof error.error === 'string' && error.error
+          ? error.error
+          : error.name === 'TimeoutError'
+            ? 'The request timed out. Wait a moment, then submit the same transaction ID again; duplicate submissions are safe.'
             : 'We could not save the transaction ID. Check it and try again.';
-        }
-      });
+      }
+    });
   }
 }

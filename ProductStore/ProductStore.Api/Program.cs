@@ -53,6 +53,8 @@ builder.Services.AddAuthorizationBuilder()
 
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+builder.Services.AddSingleton<EmailNotificationQueue>();
+builder.Services.AddHostedService<EmailNotificationWorker>();
 builder.Services.AddHttpClient<ISmsSender, TwilioSmsSender>(c => c.Timeout = TimeSpan.FromSeconds(10));
 
 // the text message costs money, so the public checkout is limited per visitor
@@ -81,7 +83,8 @@ var app = builder.Build();
 
 // ---------- database: tables, starting lists, owner account ----------
 
-app.MigrateDb();    // applies the migrations; your seeding of genres, sizes and colors runs with it
+app.MigrateDb();
+await app.SeedStoredImagesAsync();
 
 using (var scope = app.Services.CreateScope())
 {
@@ -174,21 +177,58 @@ app.MapCustomersEndpoints();
 app.MapCommandsEndpoints();
 app.MapCheckoutEndpoints();
 
-app.MapPost("/upload", async (IFormFile file, IWebHostEnvironment env) =>
+app.MapPost("/upload", async (
+    IFormFile file,
+    ProductStoreContext db,
+    CancellationToken cancellationToken) =>
 {
-    var allowed = new[] { ".jpg", ".jpeg", ".png", ".webp" };
-    var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-    if (file.Length == 0 || file.Length > 5_000_000 || !allowed.Contains(ext))
+    var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+    if (file.Length == 0 || file.Length > 5_000_000 || ImageFiles.ContentTypeFor(file.FileName) is null)
         return Results.BadRequest("Upload a JPG, PNG or WebP image under 5 MB.");
 
-    var folder = Path.Combine(env.ContentRootPath, "wwwroot", "uploads");
-    Directory.CreateDirectory(folder);
-    var name = $"{Guid.NewGuid():N}{ext}";
-    await using var stream = File.Create(Path.Combine(folder, name));
-    await file.CopyToAsync(stream);
+    await using var memory = new MemoryStream();
+    await file.CopyToAsync(memory, cancellationToken);
+    var data = memory.ToArray();
+    var contentType = ImageFiles.DetectContentType(data, file.FileName);
+    if (contentType is null)
+        return Results.BadRequest("That file is not a valid JPG, PNG or WebP image.");
 
-    return Results.Ok(new { url = $"/uploads/{name}" });
+    var name = $"{Guid.NewGuid():N}{extension}";
+    db.StoredImages.Add(new StoredImage
+    {
+        FileName = name,
+        ContentType = contentType,
+        Data = data
+    });
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new { url = $"/uploads/{name}", persistent = true });
 }).DisableAntiforgery().RequireAuthorization("Owner");
+
+app.MapGet("/uploads/{fileName}", async (
+    string fileName,
+    ProductStoreContext db,
+    IWebHostEnvironment env,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(fileName) || Path.GetFileName(fileName) != fileName)
+        return Results.NotFound();
+
+    var image = await db.StoredImages.AsNoTracking()
+        .FirstOrDefaultAsync(i => i.FileName == fileName, cancellationToken);
+    if (image is not null)
+    {
+        context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+        return Results.File(image.Data, image.ContentType, fileName, enableRangeProcessing: true);
+    }
+
+    var existingFile = Path.Combine(env.ContentRootPath, "wwwroot", "uploads", fileName);
+    if (File.Exists(existingFile))
+        return Results.File(existingFile, ImageFiles.ContentTypeFor(fileName) ?? "application/octet-stream");
+
+    var placeholder = Path.Combine(env.ContentRootPath, "wwwroot", "placeholder.svg");
+    return Results.File(placeholder, "image/svg+xml");
+}).AllowAnonymous();
 
 app.MapFallbackToFile("index.html");     // keep last: lets /cart and /admin open when the page is refreshed
 
