@@ -22,6 +22,7 @@ export interface RowAction {
   confirm?: string;
   show?: (row: any) => boolean;
   body?: (row: any) => any;
+  href?: (row: any) => string | null;
 }
 
 export interface CrudConfig {

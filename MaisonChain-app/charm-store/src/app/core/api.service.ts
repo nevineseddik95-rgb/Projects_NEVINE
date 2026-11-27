@@ -10,6 +10,7 @@ export class ApiService {
 
   list<T = any>(endpoint: string): Observable<T[]> { return this.http.get<T[]>(`${this.base}/${endpoint}`);}
   get<T = any>(endpoint: string, id: string): Observable<T> { return this.http.get<T>(`${this.base}/${endpoint}/${id}`); }
+  options<T = any>(endpoint: string): Observable<T> { return this.http.get<T>(`${this.base}/${endpoint}`); }
   create(endpoint: string, body: any): Observable<any> { return this.http.post(`${this.base}/${endpoint}`, body); }
   update(endpoint: string, id: string, body: any): Observable<any> { return this.http.put(`${this.base}/${endpoint}/${id}`, body); }
   remove(endpoint: string, id: string): Observable<any> { return this.http.delete(`${this.base}/${endpoint}/${id}`); }

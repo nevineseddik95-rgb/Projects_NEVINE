@@ -1,8 +1,6 @@
-using System.Net;
 using Microsoft.EntityFrameworkCore;
 using productStore.Api.Data;
 using productStore.Api.Models;
-using ProductStore.Api.Models;
 using ProductStore.Api.Services;
 
 namespace ProductStore.Api.Endpoints;
@@ -30,11 +28,46 @@ public static class CommandsEndpoints
     {
         var g = app.MapGroup("/commands").RequireAuthorization("Staff");
 
-        g.MapGet("/", (ProductStoreContext db, CancellationToken cancellationToken) =>
-            db.Commands.AsNoTracking()
-                .OrderByDescending(c => c.CreatedAt)
-                .ThenByDescending(c => c.Id)
-                .ToListAsync(cancellationToken));
+        g.MapGet("/", async (ProductStoreContext db, CancellationToken cancellationToken) =>
+        {
+            var orders = await (
+                from command in db.Commands.AsNoTracking()
+                join customer in db.Customers.AsNoTracking() on command.CustomerId equals customer.Id
+                orderby command.CreatedAt descending, command.Id descending
+                select new
+                {
+                    command.Id,
+                    command.ReferenceNumber,
+                    command.CustomerId,
+                    command.ProductId,
+                    command.Model,
+                    command.GenreId,
+                    command.ColorId,
+                    command.SizeId,
+                    command.DeliveryAddress,
+                    command.Date,
+                    command.Status,
+                    command.StatusNote,
+                    command.TrackingNumber,
+                    command.CreatedAt,
+                    command.UpdatedAt,
+                    command.StatusUpdatedAt,
+                    command.DeliveredAt,
+                    command.CancelledAt,
+                    command.Total,
+                    command.Note,
+                    command.ImageUrl,
+                    command.DepositAmount,
+                    command.PaymentStatus,
+                    command.PaymentReference,
+                    command.PaymentMethod,
+                    customerPhone = customer.Phone,
+                    customerName = customer.FullName,
+                    customerEmail = customer.Email
+                }).ToListAsync(cancellationToken);
+
+            return Results.Ok(orders);
+        });
 
         g.MapGet("/{id}", async (Guid id, ProductStoreContext db, CancellationToken cancellationToken) =>
             await db.Commands.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, cancellationToken) is { } c
@@ -106,7 +139,7 @@ public static class CommandsEndpoints
             Guid id,
             ChangeOrderStatus dto,
             ProductStoreContext db,
-            EmailNotificationQueue emailQueue,
+            OrderNotifications notifications,
             CancellationToken cancellationToken) =>
         {
             var command = await db.Commands.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
@@ -132,22 +165,25 @@ public static class CommandsEndpoints
             await db.SaveChangesAsync(cancellationToken);
 
             var customer = await db.Customers.FindAsync([command.CustomerId], cancellationToken);
-            if (customer is not null && !string.IsNullOrWhiteSpace(customer.Email))
-            {
-                emailQueue.TryEnqueue(new EmailNotification(
-                    customer.Email,
-                    customer.FullName,
-                    $"Order {command.ReferenceNumber} is now {nextStatus}",
-                    BuildCustomerStatusEmail(command, customer.FullName)));
-            }
+            var notificationResult = customer is null
+                ? new NotificationResult(false, false)
+                : notifications.QueueStatusChanged(command, customer, previousStatus);
 
-            return Results.Ok(new { command.Id, command.Status, command.PaymentStatus, command.StatusUpdatedAt });
+            return Results.Ok(new
+            {
+                command.Id,
+                command.Status,
+                command.PaymentStatus,
+                command.StatusUpdatedAt,
+                emailQueued = notificationResult.EmailQueued,
+                smsQueued = notificationResult.SmsQueued
+            });
         });
 
         g.MapPost("/{id}/confirm-payment", async (
             Guid id,
             ProductStoreContext db,
-            EmailNotificationQueue emailQueue,
+            OrderNotifications notifications,
             CancellationToken cancellationToken) =>
         {
             var command = await db.Commands.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
@@ -158,14 +194,26 @@ public static class CommandsEndpoints
             command.PaymentStatus = "Deposit paid";
             command.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
-            await NotifyPayment(emailQueue, db, command, "Deposit confirmed", cancellationToken);
-            return Results.Ok(new { command.Id, command.Status, command.PaymentStatus });
+
+            var customer = await db.Customers.FindAsync([command.CustomerId], cancellationToken);
+            var notificationResult = customer is null
+                ? new NotificationResult(false, false)
+                : notifications.QueuePaymentConfirmed(command, customer, "Deposit confirmed");
+
+            return Results.Ok(new
+            {
+                command.Id,
+                command.Status,
+                command.PaymentStatus,
+                emailQueued = notificationResult.EmailQueued,
+                smsQueued = notificationResult.SmsQueued
+            });
         });
 
         g.MapPost("/{id}/mark-paid-in-full", async (
             Guid id,
             ProductStoreContext db,
-            EmailNotificationQueue emailQueue,
+            OrderNotifications notifications,
             CancellationToken cancellationToken) =>
         {
             var command = await db.Commands.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
@@ -176,8 +224,20 @@ public static class CommandsEndpoints
             command.PaymentStatus = "Paid in full";
             command.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
-            await NotifyPayment(emailQueue, db, command, "Payment complete", cancellationToken);
-            return Results.Ok(new { command.Id, command.Status, command.PaymentStatus });
+
+            var customer = await db.Customers.FindAsync([command.CustomerId], cancellationToken);
+            var notificationResult = customer is null
+                ? new NotificationResult(false, false)
+                : notifications.QueuePaymentConfirmed(command, customer, "Payment complete");
+
+            return Results.Ok(new
+            {
+                command.Id,
+                command.Status,
+                command.PaymentStatus,
+                emailQueued = notificationResult.EmailQueued,
+                smsQueued = notificationResult.SmsQueued
+            });
         });
     }
 
@@ -211,51 +271,5 @@ public static class CommandsEndpoints
         if (await db.Commands.AnyAsync(c => c.Id != commandId && c.PaymentReference == reference, cancellationToken))
             return "This transaction ID is already linked to another order.";
         return null;
-    }
-
-    private static async Task NotifyPayment(
-        EmailNotificationQueue queue,
-        ProductStoreContext db,
-        Command command,
-        string subject,
-        CancellationToken cancellationToken)
-    {
-        var customer = await db.Customers.FindAsync([command.CustomerId], cancellationToken);
-        if (customer is null || string.IsNullOrWhiteSpace(customer.Email)) return;
-
-        queue.TryEnqueue(new EmailNotification(
-            customer.Email,
-            customer.FullName,
-            $"{subject} - {command.ReferenceNumber}",
-            $"""
-            <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#2a1f2d;line-height:1.5">
-              <h2 style="color:#7d4e7e">{WebUtility.HtmlEncode(subject)}</h2>
-              <p>Hello {WebUtility.HtmlEncode(customer.FullName)},</p>
-              <p>Your payment for order <strong>{WebUtility.HtmlEncode(command.ReferenceNumber)}</strong> is now recorded as <strong>{WebUtility.HtmlEncode(command.PaymentStatus)}</strong>.</p>
-              <p>Order status: <strong>{WebUtility.HtmlEncode(command.Status)}</strong>.</p>
-              <p>Thank you for shopping with Beauty &amp; Shine.</p>
-            </div>
-            """));
-    }
-
-    private static string BuildCustomerStatusEmail(Command command, string customerName)
-    {
-        var tracking = string.IsNullOrWhiteSpace(command.TrackingNumber)
-            ? ""
-            : $"<p>Tracking number: <strong>{WebUtility.HtmlEncode(command.TrackingNumber)}</strong></p>";
-        var note = string.IsNullOrWhiteSpace(command.StatusNote)
-            ? ""
-            : $"<p>{WebUtility.HtmlEncode(command.StatusNote)}</p>";
-
-        return $"""
-        <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#2a1f2d;line-height:1.5">
-          <h2 style="color:#7d4e7e">Order update: {WebUtility.HtmlEncode(command.Status)}</h2>
-          <p>Hello {WebUtility.HtmlEncode(customerName)},</p>
-          <p>Your order <strong>{WebUtility.HtmlEncode(command.ReferenceNumber)}</strong> is now <strong>{WebUtility.HtmlEncode(command.Status)}</strong>.</p>
-          {note}
-          {tracking}
-          <p>Thank you for shopping with Beauty &amp; Shine.</p>
-        </div>
-        """;
     }
 }

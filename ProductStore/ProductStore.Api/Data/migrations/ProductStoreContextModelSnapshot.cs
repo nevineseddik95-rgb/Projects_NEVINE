@@ -306,6 +306,9 @@ namespace productStore.Api.Data.migrations
                     b.Property<string>("Phone")
                         .HasColumnType("text");
 
+                    b.Property<bool>("SmsUpdates")
+                        .HasColumnType("boolean");
+
                     b.HasKey("Id");
 
                     b.ToTable("Customers");

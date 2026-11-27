@@ -55,9 +55,19 @@ builder.Services.AddSignalR();
 builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 builder.Services.AddSingleton<EmailNotificationQueue>();
 builder.Services.AddHostedService<EmailNotificationWorker>();
-builder.Services.AddHttpClient<ISmsSender, TwilioSmsSender>(c => c.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddSingleton<SmsNotificationQueue>();
+builder.Services.AddHostedService<SmsNotificationWorker>();
+builder.Services.AddSingleton<OrderNotifications>();
 
-// the text message costs money, so the public checkout is limited per visitor
+var smsProvider = builder.Configuration["Sms:Provider"]?.Trim();
+if (string.Equals(smsProvider, "TextBelt", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddHttpClient<ISmsSender, TextBeltSmsSender>(c => c.Timeout = TimeSpan.FromSeconds(10));
+else if (string.Equals(smsProvider, "Vonage", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddHttpClient<ISmsSender, VonageSmsSender>(c => c.Timeout = TimeSpan.FromSeconds(10));
+else
+    builder.Services.AddSingleton<ISmsSender, DisabledSmsSender>();
+
+// Public checkout is limited because it creates records and can queue notifications.
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -166,6 +176,8 @@ app.Use(async (ctx, next) =>
 
 app.MapHub<AdminHub>("/hubs/admin");
 app.MapGet("/status", () => Results.Ok(new { service = "ProductStore API", status = "running" }));
+app.MapGet("/notifications/options", (IConfiguration config) =>
+    Results.Ok(new { smsEnabled = SmsSettings.IsEnabled(config) }));
 
 app.MapAuthEndpoints();
 app.MapAdminsEndpoints();

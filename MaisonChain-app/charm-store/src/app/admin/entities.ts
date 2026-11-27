@@ -30,6 +30,31 @@ export const SIZES: CrudConfig = {
 
 const depositConfirmed = (row: any) => row.paymentStatus === 'Deposit paid' || row.paymentStatus === 'Paid in full';
 
+const orderSmsHref = (row: any): string | null => {
+  const phone = String(row.customerPhone ?? '').replace(/[^\d+]/g, '');
+  if (!phone) return null;
+
+  const money = (value: any) =>
+    `${Math.round(Number(value) || 0).toLocaleString('fr-FR').replace(/[\u202f\u00a0]/g, ' ')} KMF`;
+  const balance = row.paymentStatus === 'Paid in full'
+    ? 0
+    : Math.max(0, Number(row.total) - Number(row.depositAmount));
+  const lines = [
+    'Beauty & Shine',
+    row.customerName ? `Hello ${row.customerName},` : '',
+    `Order ${row.referenceNumber}`,
+    `Status: ${row.status} | Payment: ${row.paymentStatus}`,
+    `Items: ${row.model}`,
+    `Total: ${money(row.total)} | Deposit: ${money(row.depositAmount)} | Balance: ${money(balance)}`
+  ].filter(Boolean);
+
+  if (row.trackingNumber) lines.push(`Tracking: ${row.trackingNumber}`);
+  if (row.statusNote) lines.push(`Update: ${row.statusNote}`);
+  lines.push('Keep this reference for follow-up.');
+
+  return `sms:${phone}?body=${encodeURIComponent(lines.join('\n'))}`;
+};
+
 export const COMMANDS: CrudConfig = {
   title: 'Orders', singular: 'order', endpoint: 'commands',
   fields: [
@@ -63,6 +88,11 @@ export const COMMANDS: CrudConfig = {
     { label: 'Open orders only', test: row => row.status !== 'Delivered' && row.status !== 'Cancelled' }
   ],
   rowActions: [
+    {
+      label: 'Text customer', path: 'sms',
+      show: row => !!row.customerPhone,
+      href: orderSmsHref
+    },
     {
       label: 'Confirm deposit', path: 'confirm-payment',
       confirm: 'Confirm that the deposit was received?',

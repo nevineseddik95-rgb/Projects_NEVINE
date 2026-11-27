@@ -89,9 +89,14 @@
             </td>
           }
           <td class="row-actions">
-            @if (canEdit) {
-              @for (a of cfg.rowActions ?? []; track a.path) {
-                @if (!a.show || a.show(r)) {
+            @for (a of cfg.rowActions ?? []; track $index) {
+              @if (!a.show || a.show(r)) {
+                @if (a.href) {
+                  @if (a.href(r); as href) {
+                    <button class="btn btn-ghost" type="button" (click)="openLink(href)"
+                            title="Opens your SMS app with the order details ready to send.">{{ a.label }}</button>
+                  }
+                } @else if (canEdit) {
                   <button class="btn btn-primary" type="button" (click)="runAction(a, r)"
                           [disabled]="actionBusy === r.id + ':' + a.path">
                     {{ actionBusy === r.id + ':' + a.path ? 'Working…' : a.label }}

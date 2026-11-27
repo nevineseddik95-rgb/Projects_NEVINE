@@ -20,6 +20,7 @@ public class CheckoutRequest
     public string FullName { get; set; } = "";
     public string? Email { get; set; }
     public string? Phone { get; set; }
+    public bool SmsUpdates { get; set; } = true;
     public string DeliveryAddress { get; set; } = "";
     public decimal DepositAmount { get; set; }
     public string PaymentMethod { get; set; } = "";
@@ -46,6 +47,7 @@ public static class CheckoutEndpoints
             ProductStoreContext db,
             IConfiguration config,
             EmailNotificationQueue emailQueue,
+            OrderNotifications notifications,
             CancellationToken cancellationToken) =>
         {
             var name = (req.FullName ?? "").Trim();
@@ -98,14 +100,17 @@ public static class CheckoutEndpoints
                     FullName = name,
                     Email = emailAddress,
                     Phone = phone,
+                    SmsUpdates = req.SmsUpdates,
                     Address = req.DeliveryAddress.Trim()
                 };
                 db.Customers.Add(customer);
                 await db.SaveChangesAsync(cancellationToken);
             }
-            else if (emailAddress.Length > 0 && string.IsNullOrEmpty(customer.Email))
+            else
             {
-                customer.Email = emailAddress;
+                if (emailAddress.Length > 0 && string.IsNullOrEmpty(customer.Email))
+                    customer.Email = emailAddress;
+                customer.SmsUpdates = req.SmsUpdates;
                 await db.SaveChangesAsync(cancellationToken);
             }
 
@@ -144,12 +149,7 @@ public static class CheckoutEndpoints
             await transaction.CommitAsync(cancellationToken);
 
             var instructions = config[$"Payment:Instructions:{req.PaymentMethod}"] ?? "";
-            var emailLines = lines.Select(l => (l.Item.Model, l.Qty, l.Item.Price)).ToList();
-            var customerEmailQueued = emailAddress.Length > 0 && emailQueue.TryEnqueue(new EmailNotification(
-                emailAddress,
-                name,
-                $"Your order {order.ReferenceNumber} - Beauty & Shine",
-                BuildConfirmationEmail(order, name, instructions, emailLines)));
+            var notificationResult = notifications.QueueOrderCreated(order, customer, instructions);
 
             NotifyAdmin(emailQueue, config,
                 $"New order {order.ReferenceNumber} - {summary}",
@@ -164,8 +164,9 @@ public static class CheckoutEndpoints
                 balance = total - deposit,
                 method = req.PaymentMethod,
                 instructions,
-                emailQueued = customerEmailQueued,
-                smsSent = false,
+                emailQueued = notificationResult.EmailQueued,
+                smsQueued = notificationResult.SmsQueued,
+                smsRequested = customer.SmsUpdates,
                 phone
             });
         }).RequireRateLimiting("checkout");
@@ -176,6 +177,7 @@ public static class CheckoutEndpoints
             ProductStoreContext db,
             IConfiguration config,
             EmailNotificationQueue emailQueue,
+            OrderNotifications notifications,
             CancellationToken cancellationToken) =>
         {
             var transactionId = (notice.TransactionId ?? "").Trim();
@@ -195,7 +197,7 @@ public static class CheckoutEndpoints
 
             if (order.PaymentStatus == "Payment submitted" &&
                 string.Equals(order.PaymentReference, transactionId, StringComparison.OrdinalIgnoreCase))
-                return Results.Ok(new { received = true, duplicate = true });
+                return Results.Ok(new { received = true, duplicate = true, emailQueued = false, smsQueued = false });
             if (order.PaymentStatus != "Unpaid")
                 return Results.BadRequest("This payment is already being checked or confirmed.");
             if (await db.Commands.AnyAsync(c => c.Id != order.Id && c.PaymentReference == transactionId, cancellationToken))
@@ -213,13 +215,20 @@ public static class CheckoutEndpoints
                 return Results.Conflict("This transaction ID is already linked to another order. Check it and try again.");
             }
 
+            var notificationResult = notifications.QueuePaymentSubmitted(order, customer);
             NotifyAdmin(emailQueue, config,
                 $"Payment submitted for {order.ReferenceNumber}",
                 $"<p>{WebUtility.HtmlEncode(customer.FullName)} says they paid the deposit for order <strong>{WebUtility.HtmlEncode(order.ReferenceNumber)}</strong> ({Money(order.DepositAmount)}).</p>" +
                 $"<p>Transaction ID: <strong>{WebUtility.HtmlEncode(order.PaymentReference)}</strong></p>" +
                 "<p>Check it in your MVola statement, then press <em>Confirm deposit</em> on the admin Orders page.</p>");
 
-            return Results.Ok(new { received = true, duplicate = false });
+            return Results.Ok(new
+            {
+                received = true,
+                duplicate = false,
+                emailQueued = notificationResult.EmailQueued,
+                smsQueued = notificationResult.SmsQueued
+            });
         }).RequireRateLimiting("checkout");
     }
 
@@ -231,36 +240,6 @@ public static class CheckoutEndpoints
         var admin = config["Notifications:AdminEmail"];
         if (!string.IsNullOrWhiteSpace(admin))
             queue.TryEnqueue(new EmailNotification(admin, "Beauty & Shine admin", subject, htmlBody));
-    }
-
-    private static string BuildConfirmationEmail(Command o, string name, string instructions,
-        List<(string Model, int Qty, decimal Unit)> lines)
-    {
-        string E(string? s) => WebUtility.HtmlEncode(s ?? "");
-        var how = string.IsNullOrWhiteSpace(instructions)
-            ? "We will contact you with the payment details."
-            : E(instructions);
-        var rows = string.Join("", lines.Select(l =>
-            $"<tr><td style=\"padding:6px 0;border-bottom:1px solid #ebe0ec\">{E(l.Model)} x {l.Qty}</td><td style=\"padding:6px 0;border-bottom:1px solid #ebe0ec;text-align:right\">{Money(l.Unit * l.Qty)}</td></tr>"));
-
-        return $"""
-        <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;color:#2a1f2d;line-height:1.5">
-          <h2 style="color:#7d4e7e;margin-bottom:4px">Thank you for your order, {E(name)}</h2>
-          <p>We have received your order. Your reference number is:</p>
-          <p style="font-size:22px;font-weight:bold;letter-spacing:1px;margin:8px 0 16px">{E(o.ReferenceNumber)}</p>
-          <table style="width:100%;border-collapse:collapse">
-            {rows}
-            <tr><td style="padding:6px 0;border-bottom:1px solid #ebe0ec"><strong>Total</strong></td><td style="padding:6px 0;border-bottom:1px solid #ebe0ec;text-align:right"><strong>{Money(o.Total)}</strong></td></tr>
-            <tr><td style="padding:6px 0;border-bottom:1px solid #ebe0ec"><strong>Deposit to pay now</strong></td><td style="padding:6px 0;border-bottom:1px solid #ebe0ec;text-align:right"><strong>{Money(o.DepositAmount)}</strong></td></tr>
-            <tr><td style="padding:6px 0;border-bottom:1px solid #ebe0ec">Balance later</td><td style="padding:6px 0;border-bottom:1px solid #ebe0ec;text-align:right">{Money(o.Total - o.DepositAmount)}</td></tr>
-            <tr><td style="padding:6px 0">Delivery address</td><td style="padding:6px 0;border-bottom:1px solid #ebe0ec;text-align:right">{E(o.DeliveryAddress)}</td></tr>
-          </table>
-          <h3 style="color:#7d4e7e;margin-top:24px">How to pay your deposit with {E(o.PaymentMethod)}</h3>
-          <p>{how}</p>
-          <p>After you pay, keep your payment confirmation message and enter its transaction ID on the confirmation page of our website.</p>
-          <p style="color:#75677a;font-size:13px;margin-top:24px">Please keep this email. You will need the reference number if you contact us.</p>
-        </div>
-        """;
     }
 
     private static string BuildAdminNewOrderEmail(Command o, string name, string emailAddress, string? phone)
@@ -279,6 +258,8 @@ public static class CheckoutEndpoints
             {Row("Items", E(o.Model))}
             {Row("Total", Money(o.Total))}
             {Row("Deposit due", Money(o.DepositAmount))}
+            {Row("Status", E(o.Status))}
+            {Row("Payment", E(o.PaymentStatus))}
             {Row("Payment method", E(o.PaymentMethod))}
             {Row("Delivery address", E(o.DeliveryAddress))}
           </table>

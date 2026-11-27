@@ -254,6 +254,10 @@ export class CrudPageComponent implements OnInit {
     });
   }
 
+  openLink(href: string): void {
+    window.location.href = href;
+  }
+
   remove(row: any): void {
     if (!this.canEdit) return;
     if (!confirm(`Delete this ${this.cfg.singular}? This cannot be undone.`)) return;

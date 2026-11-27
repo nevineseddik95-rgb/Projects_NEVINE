@@ -15,6 +15,8 @@ interface CheckoutResult {
   method: string;
   instructions: string;
   emailQueued: boolean;
+  smsQueued: boolean;
+  smsRequested: boolean;
   phone: string;
 }
 
@@ -38,6 +40,9 @@ interface CheckoutResult {
           } @else if (email) {
             <p class="hint">Your order is saved, but the confirmation email could not be queued.</p>
           }
+          @if (done.smsQueued) {
+            <p class="hint">Your confirmation SMS is queued with your reference and order details.</p>
+          }
           @for (i of done.items; track i.model) {
             <div class="row"><span>{{ i.model }} × {{ i.quantity }}</span><span>{{ i.lineTotal | kmf }}</span></div>
           }
@@ -51,6 +56,9 @@ interface CheckoutResult {
 
           @if (noticeSent) {
             <p class="notice">Thank you. We received your transaction ID and will confirm your order once we check the payment.</p>
+            @if (noticeSmsQueued) {
+              <p class="hint">Your payment-update SMS is queued.</p>
+            }
           } @else {
             <form #pf="ngForm" (ngSubmit)="sendNotice()">
               <div class="field">
@@ -96,6 +104,13 @@ interface CheckoutResult {
             <label for="phone">Phone</label>
             <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+269 321 2345" [(ngModel)]="phone" required>
           </div>
+          @if (smsAvailable) {
+            <label class="check">
+              <input type="checkbox" name="smsUpdates" [(ngModel)]="smsUpdates">
+              Text me order updates by SMS
+            </label>
+            <p class="hint">Includes your reference, items, payment confirmation, and delivery status.</p>
+          }
           <div class="field">
             <label for="address">Delivery address</label>
             <textarea id="address" name="address" rows="3" autocomplete="street-address" [(ngModel)]="address" required></textarea>
@@ -127,6 +142,8 @@ export class CheckoutComponent implements OnInit {
   fullName = '';
   email = '';
   phone = '';
+  smsAvailable = false;
+  smsUpdates = false;
   address = '';
   method = 'MVola';
   deposit: number | null = null;
@@ -136,10 +153,18 @@ export class CheckoutComponent implements OnInit {
 
   transactionId = '';
   noticeSent = false;
+  noticeSmsQueued = false;
   noticeError = '';
 
   ngOnInit(): void {
     this.deposit = this.minDeposit;
+    this.api.options<{ smsEnabled: boolean }>('notifications/options').subscribe({
+      next: options => {
+        this.smsAvailable = !!options.smsEnabled;
+        this.smsUpdates = this.smsAvailable;
+      },
+      error: () => (this.smsAvailable = false)
+    });
     this.api.list('products').subscribe({
       next: rows => {
         this.cart.sync(rows.map(toCartProduct));
@@ -169,6 +194,7 @@ export class CheckoutComponent implements OnInit {
       fullName: this.fullName,
       email: this.email,
       phone: this.phone,
+      smsUpdates: this.smsAvailable && this.smsUpdates,
       deliveryAddress: this.address,
       depositAmount: this.deposit,
       paymentMethod: this.method,
@@ -209,7 +235,10 @@ export class CheckoutComponent implements OnInit {
       timeout(30000),
       finalize(() => (this.busy = false))
     ).subscribe({
-      next: () => (this.noticeSent = true),
+      next: result => {
+        this.noticeSent = true;
+        this.noticeSmsQueued = !!result.smsQueued;
+      },
       error: error => {
         this.noticeError = typeof error.error === 'string' && error.error
           ? error.error
