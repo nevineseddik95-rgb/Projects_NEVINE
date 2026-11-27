@@ -91,6 +91,15 @@ builder.AddProductStoreDb();
 
 var app = builder.Build();
 
+var emailUser = builder.Configuration["Email:Username"];
+var emailPassword = builder.Configuration["Email:Password"];
+var emailEnabled = !string.IsNullOrWhiteSpace(builder.Configuration["Email:Host"])
+    && !string.IsNullOrWhiteSpace(builder.Configuration["Email:FromAddress"] ?? emailUser)
+    && (string.IsNullOrWhiteSpace(emailUser) || !string.IsNullOrWhiteSpace(emailPassword));
+app.Logger.LogInformation(
+    "Email notifications are {State}.",
+    emailEnabled ? "configured" : "not configured; set Email__Host, Email__FromAddress, Email__Username and Email__Password");
+
 // ---------- database: tables, starting lists, owner account ----------
 
 app.MigrateDb();
@@ -177,7 +186,19 @@ app.Use(async (ctx, next) =>
 app.MapHub<AdminHub>("/hubs/admin");
 app.MapGet("/status", () => Results.Ok(new { service = "ProductStore API", status = "running" }));
 app.MapGet("/notifications/options", (IConfiguration config) =>
-    Results.Ok(new { smsEnabled = SmsSettings.IsEnabled(config) }));
+{
+    var emailUser = config["Email:Username"];
+    var emailPassword = config["Email:Password"];
+    var emailEnabled = !string.IsNullOrWhiteSpace(config["Email:Host"])
+        && !string.IsNullOrWhiteSpace(config["Email:FromAddress"] ?? emailUser)
+        && (string.IsNullOrWhiteSpace(emailUser) || !string.IsNullOrWhiteSpace(emailPassword));
+
+    return Results.Ok(new
+    {
+        smsEnabled = SmsSettings.IsEnabled(config),
+        emailEnabled
+    });
+});
 
 app.MapAuthEndpoints();
 app.MapAdminsEndpoints();

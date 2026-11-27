@@ -30,7 +30,6 @@ interface Product {
       <nav class="shop-nav" aria-label="Shop">
         <a class="nav-link" routerLink="/favorites">Favorites <span class="nav-badge">{{ favs.count() }}</span></a>
         <a class="nav-link" routerLink="/cart">Cart <span class="nav-badge">{{ cart.count() }}</span></a>
-        <a class="nav-link" routerLink="/admin">Admin</a>
       </nav>
     </header>
 

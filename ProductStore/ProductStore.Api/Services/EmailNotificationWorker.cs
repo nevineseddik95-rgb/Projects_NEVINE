@@ -9,6 +9,7 @@ public sealed class EmailNotificationWorker(
     {
         await foreach (var notification in queue.ReadAllAsync(stoppingToken))
         {
+            logger.LogInformation("Sending email notification: {Subject}", notification.Subject);
             for (var attempt = 1; attempt <= 2; attempt++)
             {
                 try
@@ -17,7 +18,10 @@ public sealed class EmailNotificationWorker(
                     var sender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
                     if (await sender.SendAsync(notification.ToEmail, notification.ToName,
                             notification.Subject, notification.HtmlBody, stoppingToken))
+                    {
+                        logger.LogInformation("Email notification sent: {Subject}", notification.Subject);
                         break;
+                    }
 
                     if (attempt == 2)
                         logger.LogError("Email notification to {Recipient} failed after two attempts.", notification.ToEmail);
