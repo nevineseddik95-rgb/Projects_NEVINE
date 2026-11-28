@@ -12,8 +12,9 @@ import { TranslationParams } from '../core/translations';
 interface CommissionRow {
   orderId: string;
   referenceNumber: string;
-  adminId: string;
+  adminId: string | null;
   adminName: string;
+  adminPhone: string | null;
   customerName: string | null;
   orderDate: string;
   createdAt: string;
@@ -115,8 +116,16 @@ interface CommissionRow {
                 <td>{{ formatDate(r.paidAt) }}</td>
                 @if (auth.isOwner()) {
                   <td class="row-actions">
+                    @if (r.adminPhone) {
+                      <a class="btn btn-ghost" [href]="smsHref(r)">
+                        {{ 'commissions.textAdmin' | translate }}
+                      </a>
+                    }
                     <button class="btn btn-ghost" type="button" [disabled]="!r.eligible" (click)="openPayment(r)">
                       {{ t(r.paidAmount > 0 ? 'commissions.updatePayment' : 'commissions.recordPayment') }}
+                    </button>
+                    <button class="btn btn-danger" type="button" [disabled]="!!deleteBusy" (click)="deleteCommission(r)">
+                      {{ 'commissions.deleteEntry' | translate }}
                     </button>
                   </td>
                 }
@@ -187,6 +196,7 @@ export class CommissionsComponent implements OnInit, OnDestroy {
   paymentAmount: number | null = null;
   paymentNote = '';
   paymentBusy = false;
+  deleteBusy = '';
   private previousBodyOverflow = '';
 
   get locale(): string { return this.language.locale(); }
@@ -290,6 +300,41 @@ export class CommissionsComponent implements OnInit, OnDestroy {
         const body = error.error;
         const raw = typeof body === 'string' ? body : body?.detail ?? body?.title ?? '';
         this.error = this.language.apiMessage(raw) || this.t('commissions.paymentFailed');
+      }
+    });
+  }
+
+  smsHref(row: CommissionRow): string | null {
+    const phone = String(row.adminPhone ?? '').replace(/[^\d+]/g, '');
+    if (!phone) return null;
+    const lines = [
+      'Beauty & Shine',
+      this.t('commissions.smsMessage', {
+        name: row.adminName,
+        reference: row.referenceNumber,
+        amount: this.formatMoney(row.paidAmount, 2)
+      })
+    ];
+    if (row.paymentNote) lines.push(`${this.t('commissions.paymentNote')}: ${row.paymentNote}`);
+    return `sms:${phone}?body=${encodeURIComponent(lines.join('\n'))}`;
+  }
+
+  deleteCommission(row: CommissionRow): void {
+    if (!this.auth.isOwner() || this.deleteBusy) return;
+    if (!confirm(this.t('commissions.deleteConfirm'))) return;
+    this.deleteBusy = row.orderId;
+    this.error = '';
+    this.api.remove('commissions', row.orderId).subscribe({
+      next: () => {
+        this.rows = this.rows.filter(item => item.orderId !== row.orderId);
+        if (this.paymentRow?.orderId === row.orderId) this.closePayment();
+        this.deleteBusy = '';
+      },
+      error: error => {
+        this.deleteBusy = '';
+        const body = error.error;
+        const raw = typeof body === 'string' ? body : body?.detail ?? body?.title ?? '';
+        this.error = this.language.apiMessage(raw) || this.t('commissions.deleteFailed');
       }
     });
   }

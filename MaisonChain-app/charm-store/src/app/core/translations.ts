@@ -375,6 +375,11 @@ const en: Record<string, string> = {
   'commissions.paymentNotePlaceholder': 'Method, transaction reference, or payout note',
   'commissions.paymentRange': 'Enter an amount between 0 and the commission total.',
   'commissions.paymentFailed': 'The commission payment could not be saved.',
+  'commissions.textAdmin': 'Text admin',
+  'commissions.deleteEntry': 'Delete entry',
+  'commissions.deleteConfirm': 'Delete this commission entry? The order and its history will be kept.',
+  'commissions.deleteFailed': 'The commission entry could not be deleted.',
+  'commissions.smsMessage': 'Hello {name}, your commission for order {reference} has been paid: {amount}.',
 
   'api.productNotFound': 'Product not found.',
   'api.customerNotFound': 'Customer not found.',
@@ -776,6 +781,11 @@ const fr: Record<string, string> = {
   'commissions.paymentNotePlaceholder': 'Méthode, référence de transaction ou note de versement',
   'commissions.paymentRange': 'Saisissez un montant entre 0 et le total de la commission.',
   'commissions.paymentFailed': 'Le paiement de la commission n’a pas pu être enregistré.',
+  'commissions.textAdmin': 'SMS à l’administrateur',
+  'commissions.deleteEntry': 'Supprimer l’entrée',
+  'commissions.deleteConfirm': 'Supprimer cette entrée de commission ? La commande et son historique seront conservés.',
+  'commissions.deleteFailed': 'L’entrée de commission n’a pas pu être supprimée.',
+  'commissions.smsMessage': 'Bonjour {name}, votre commission pour la commande {reference} a été payée : {amount}.',
 
   'api.productNotFound': 'Produit introuvable.',
   'api.customerNotFound': 'Client introuvable.',

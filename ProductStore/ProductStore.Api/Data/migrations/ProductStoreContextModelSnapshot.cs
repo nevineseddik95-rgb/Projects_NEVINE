@@ -35,6 +35,10 @@ namespace productStore.Api.Data.migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("Phone")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasColumnType("text");
@@ -213,11 +217,26 @@ namespace productStore.Api.Data.migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<DateTime?>("CommissionRemovedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("CreatedByAdminId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("CreatedByAdminName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("CreatedByAdminPhone")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("CreatedByAdminRole")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uuid");
@@ -370,7 +389,7 @@ namespace productStore.Api.Data.migrations
                     b.HasOne("ProductStore.Api.Models.AdminUser", null)
                         .WithMany()
                         .HasForeignKey("CreatedByAdminId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 #pragma warning restore 612, 618
         }

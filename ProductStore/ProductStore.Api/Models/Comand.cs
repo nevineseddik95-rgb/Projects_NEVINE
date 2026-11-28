@@ -6,6 +6,9 @@ public class Command
     public string ReferenceNumber { get; set; } = "";
     public Guid CustomerId { get; set; }
     public Guid? CreatedByAdminId { get; set; }
+    public string? CreatedByAdminName { get; set; }
+    public string? CreatedByAdminRole { get; set; }
+    public string? CreatedByAdminPhone { get; set; }
     public Guid ProductId { get; set; }
     public string Model { get; set; } = "";
     public Guid GenreId { get; set; }
@@ -26,6 +29,7 @@ public class Command
     public decimal CommissionPaidAmount { get; set; }
     public DateTime? CommissionPaidAt { get; set; }
     public string? CommissionPaymentNote { get; set; }
+    public DateTime? CommissionRemovedAt { get; set; }
     public string? Note { get; set; }
     public string? ImageUrl { get; set; }
     public decimal DepositAmount { get; set; }

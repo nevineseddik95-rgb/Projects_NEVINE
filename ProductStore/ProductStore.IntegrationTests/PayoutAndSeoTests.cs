@@ -34,7 +34,8 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
         using var created = await SendJson(HttpMethod.Post, "/admins", "Owner", new
         {
             username = "temporary-viewer",
-            password = "InitialPass123!"
+            password = "InitialPass123!",
+            phone = "+237 650 111 222"
         });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         using var createdPayload = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
@@ -43,13 +44,15 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
         using var updated = await SendJson(HttpMethod.Put, $"/admins/{id}", "Owner", new
         {
             username = "renamed-viewer",
-            password = "UpdatedPass123!"
+            password = "UpdatedPass123!",
+            phone = "+237650111223"
         });
         Assert.Equal(HttpStatusCode.NoContent, updated.StatusCode);
 
         var stored = await fixture.FindAdminAsync(id);
         Assert.NotNull(stored);
         Assert.Equal("renamed-viewer", stored.Username);
+        Assert.Equal("+237650111223", stored.Phone);
         Assert.Equal("Viewer", stored.Role);
         var hasher = new Microsoft.AspNetCore.Identity.PasswordHasher<AdminUser>();
         Assert.Equal(Microsoft.AspNetCore.Identity.PasswordVerificationResult.Success,
@@ -59,11 +62,145 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
         Assert.Equal(HttpStatusCode.OK, listed.StatusCode);
         using var listedPayload = JsonDocument.Parse(await listed.Content.ReadAsStringAsync());
         Assert.Contains(listedPayload.RootElement.EnumerateArray(),
-            item => item.GetProperty("username").GetString() == "renamed-viewer");
+            item => item.GetProperty("username").GetString() == "renamed-viewer"
+                && item.GetProperty("phone").GetString() == "+237650111223");
 
         using var deleted = await Send(HttpMethod.Delete, $"/admins/{id}", "Owner");
         Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
         Assert.Null(await fixture.FindAdminAsync(id));
+    }
+
+    [Fact]
+    public async Task Owner_can_delete_viewer_with_orders_and_keep_commission_history()
+    {
+        using var created = await SendJson(HttpMethod.Post, "/admins", "Owner", new
+        {
+            username = "deleted-viewer",
+            password = "InitialPass123!",
+            phone = "+237650222333"
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        using var createdPayload = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        var adminId = createdPayload.RootElement.GetProperty("id").GetGuid();
+        var orderId = await fixture.AddOrderAsync(adminId, 250m, "Pending", 0m);
+
+        try
+        {
+            using var forbidden = await Send(HttpMethod.Delete, $"/commissions/{orderId}", "Viewer");
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+
+            using var deleted = await Send(HttpMethod.Delete, $"/admins/{adminId}", "Owner");
+            Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+            Assert.Null(await fixture.FindAdminAsync(adminId));
+
+            using var orderResponse = await Send(HttpMethod.Get, $"/commands/{orderId}", "Owner");
+            Assert.Equal(HttpStatusCode.OK, orderResponse.StatusCode);
+            var order = await orderResponse.Content.ReadFromJsonAsync<OrderResponse>();
+            Assert.NotNull(order);
+            Assert.Null(order.CreatedByAdminId);
+            Assert.Equal("deleted-viewer", order.CreatedByAdminName);
+            Assert.Equal("Viewer", order.CreatedByAdminRole);
+
+            var commission = Assert.Single(await GetCommissions("Owner"), row => row.OrderId == orderId);
+            Assert.Null(commission.AdminId);
+            Assert.Equal("deleted-viewer", commission.AdminName);
+            Assert.Equal("+237650222333", commission.AdminPhone);
+
+            using var payout = await SendJson(HttpMethod.Post, $"/commissions/{orderId}/payment", "Owner",
+                new { amount = 500m, note = "Cash after admin removal" });
+            Assert.Equal(HttpStatusCode.OK, payout.StatusCode);
+            var sms = fixture.TryTakeSms("+237650222333", order.ReferenceNumber);
+            Assert.NotNull(sms);
+            Assert.Contains("Commission paid", sms.Message);
+            Assert.Contains(order.ReferenceNumber, sms.Message);
+
+            using var removed = await Send(HttpMethod.Delete, $"/commissions/{orderId}", "Owner");
+            Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+            Assert.DoesNotContain(await GetCommissions("Owner"), row => row.OrderId == orderId);
+            Assert.NotNull(await fixture.FindOrderAsync(orderId));
+
+            using var rejectedPayout = await SendJson(HttpMethod.Post, $"/commissions/{orderId}/payment", "Owner",
+                new { amount = 500m });
+            Assert.Equal(HttpStatusCode.BadRequest, rejectedPayout.StatusCode);
+        }
+        finally
+        {
+            await fixture.RemoveOrderAsync(orderId);
+        }
+    }
+
+    [Fact]
+    public async Task Commission_paid_sms_queues_only_when_payment_becomes_full()
+    {
+        var orderId = await fixture.AddOrderAsync(ApiFixture.ViewerId, 300m, "Pending", 0m);
+        try
+        {
+            using var orderResponse = await Send(HttpMethod.Get, $"/commands/{orderId}", "Owner");
+            var order = await orderResponse.Content.ReadFromJsonAsync<OrderResponse>();
+            Assert.NotNull(order);
+
+            using var partial = await SendJson(HttpMethod.Post, $"/commissions/{orderId}/payment", "Owner",
+                new { amount = 250m });
+            Assert.Equal(HttpStatusCode.OK, partial.StatusCode);
+            Assert.Null(fixture.TryTakeSms("+237650111222", order.ReferenceNumber));
+
+            using var full = await SendJson(HttpMethod.Post, $"/commissions/{orderId}/payment", "Owner",
+                new { amount = 500m, note = "Bank transfer" });
+            Assert.Equal(HttpStatusCode.OK, full.StatusCode);
+            var paidSms = fixture.TryTakeSms("+237650111222", order.ReferenceNumber);
+            Assert.NotNull(paidSms);
+            Assert.Contains("Commission: 500 KMF", paidSms.Message);
+            Assert.Contains("Bank transfer", paidSms.Message);
+
+            using var repeated = await SendJson(HttpMethod.Post, $"/commissions/{orderId}/payment", "Owner",
+                new { amount = 500m });
+            Assert.Equal(HttpStatusCode.OK, repeated.StatusCode);
+            Assert.Null(fixture.TryTakeSms("+237650111222", order.ReferenceNumber));
+
+            using var reversed = await SendJson(HttpMethod.Post, $"/commissions/{orderId}/payment", "Owner",
+                new { amount = 0m });
+            Assert.Equal(HttpStatusCode.OK, reversed.StatusCode);
+            Assert.Null(fixture.TryTakeSms("+237650111222", order.ReferenceNumber));
+
+            using var repaid = await SendJson(HttpMethod.Post, $"/commissions/{orderId}/payment", "Owner",
+                new { amount = 500m });
+            Assert.Equal(HttpStatusCode.OK, repaid.StatusCode);
+            Assert.NotNull(fixture.TryTakeSms("+237650111222", order.ReferenceNumber));
+        }
+        finally
+        {
+            await fixture.RemoveOrderAsync(orderId);
+        }
+    }
+
+    [Fact]
+    public async Task Orders_can_be_deleted_in_every_status()
+    {
+        var ids = new List<Guid>();
+        try
+        {
+            foreach (var status in new[] { "Pending", "Shipped", "Delivered" })
+                ids.Add(await fixture.AddOrderAsync(ApiFixture.ViewerId, 100m, status, 0m));
+
+            foreach (var id in ids)
+            {
+                using var deleted = await Send(HttpMethod.Delete, $"/commands/{id}", "Viewer");
+                Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+                Assert.Null(await fixture.FindOrderAsync(id));
+                using var fetched = await Send(HttpMethod.Get, $"/commands/{id}", "Viewer");
+                Assert.Equal(HttpStatusCode.NotFound, fetched.StatusCode);
+            }
+
+            using var listed = await Send(HttpMethod.Get, "/commands", "Owner");
+            var orders = await listed.Content.ReadFromJsonAsync<List<OrderResponse>>();
+            Assert.NotNull(orders);
+            Assert.DoesNotContain(orders, order => ids.Contains(order.Id));
+        }
+        finally
+        {
+            foreach (var id in ids)
+                await fixture.RemoveOrderAsync(id);
+        }
     }
 
     [Fact]
@@ -503,6 +640,7 @@ public sealed class ApiFixture : IAsyncLifetime
 
     public HttpClient Client { get; private set; } = null!;
     public EmailNotificationQueue EmailQueue { get; private set; } = null!;
+    public SmsNotificationQueue SmsQueue { get; private set; } = null!;
     private WebApplication app = null!;
     private SqliteConnection connection = null!;
     private string contentRoot = null!;
@@ -525,7 +663,8 @@ public sealed class ApiFixture : IAsyncLifetime
         });
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Seo:CanonicalOrigin"] = "https://example.test"
+            ["Seo:CanonicalOrigin"] = "https://example.test",
+            ["Sms:Provider"] = "Vonage"
         });
         builder.WebHost.UseTestServer();
         builder.Services.AddDbContext<ProductStoreContext>(options => options.UseSqlite(connection));
@@ -546,6 +685,7 @@ public sealed class ApiFixture : IAsyncLifetime
 
         app = builder.Build();
         EmailQueue = app.Services.GetRequiredService<EmailNotificationQueue>();
+        SmsQueue = app.Services.GetRequiredService<SmsNotificationQueue>();
         app.UsePathBase("/api");
         app.UseRouting();
         app.UseSearchEngineHeaders();
@@ -567,8 +707,8 @@ public sealed class ApiFixture : IAsyncLifetime
         await db.Database.EnsureCreatedAsync();
         db.AddRange(
             new AdminUser { Id = OwnerId, Username = "owner", Role = "Owner" },
-            new AdminUser { Id = ViewerId, Username = "staff-one", Role = "Viewer" },
-            new AdminUser { Id = OtherViewerId, Username = "staff-two", Role = "Viewer" },
+            new AdminUser { Id = ViewerId, Username = "staff-one", Role = "Viewer", Phone = "+237650111222" },
+            new AdminUser { Id = OtherViewerId, Username = "staff-two", Role = "Viewer", Phone = "+237650333444" },
             new productStore.Api.Models.Customer { Id = CustomerId, FullName = "Test Customer", Email = "CUSTOMER@Example.com" },
             new Genre { Id = GenreId, Name = "Bracelet" },
             new Color { Id = ColorId, Name = "Gold" },
@@ -600,11 +740,29 @@ public sealed class ApiFixture : IAsyncLifetime
         return null;
     }
 
+    public SmsNotification? TryTakeSms(string recipient, string? reference = null)
+    {
+        while (SmsQueue.TryRead(out var notification))
+        {
+            if (notification.ToPhone == recipient
+                && (reference is null || notification.Message.Contains(reference, StringComparison.Ordinal)))
+                return notification;
+        }
+        return null;
+    }
+
     public async Task<AdminUser?> FindAdminAsync(Guid id)
     {
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ProductStoreContext>();
         return await db.AdminUsers.AsNoTracking().FirstOrDefaultAsync(user => user.Id == id);
+    }
+
+    public async Task<productStore.Api.Models.Command?> FindOrderAsync(Guid id)
+    {
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ProductStoreContext>();
+        return await db.Commands.AsNoTracking().FirstOrDefaultAsync(command => command.Id == id);
     }
 
     public async Task<Guid> AddOrderAsync(Guid adminId, decimal total, string status, decimal paidAmount)
@@ -613,6 +771,10 @@ public sealed class ApiFixture : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<ProductStoreContext>();
         var command = Command(Guid.NewGuid(), $"BS-{Guid.NewGuid():N}"[..14], adminId, total, status,
             adminId == OwnerId ? 0m : 500m);
+        var admin = await db.AdminUsers.AsNoTracking().SingleOrDefaultAsync(user => user.Id == adminId);
+        command.CreatedByAdminName = admin?.Username;
+        command.CreatedByAdminRole = admin?.Role;
+        command.CreatedByAdminPhone = admin?.Phone;
         command.CommissionPaidAmount = paidAmount;
         command.CommissionPaidAt = paidAmount > 0 ? DateTime.UtcNow : null;
         db.Commands.Add(command);
@@ -659,6 +821,9 @@ public sealed class ApiFixture : IAsyncLifetime
         ReferenceNumber = reference,
         CustomerId = CustomerId,
         CreatedByAdminId = adminId,
+        CreatedByAdminName = adminId == OwnerId ? "owner" : adminId == ViewerId ? "staff-one" : "staff-two",
+        CreatedByAdminRole = adminId == OwnerId ? "Owner" : "Viewer",
+        CreatedByAdminPhone = adminId == ViewerId ? "+237650111222" : adminId == OtherViewerId ? "+237650333444" : null,
         ProductId = ProductId,
         Model = "Golden Bracelet",
         GenreId = GenreId,

@@ -41,6 +41,25 @@ public sealed class OrderNotifications(
                 ? "Your payment is complete. Thank you."
                 : "Your deposit is confirmed. We can now process your order.");
 
+    public bool QueueCommissionPaid(Command order, string? adminName, string? adminPhone)
+    {
+        var phone = PhoneNumber.Normalize(adminPhone);
+        if (!SmsSettings.IsEnabled(config) || phone is null) return false;
+
+        var lines = new List<string>
+        {
+            "Beauty & Shine",
+            "Commission paid",
+            $"Hello {adminName},",
+            $"Ref: {order.ReferenceNumber}",
+            $"Commission: {Money(order.CommissionPaidAmount)}"
+        };
+        if (!string.IsNullOrWhiteSpace(order.CommissionPaymentNote))
+            lines.Add($"Note: {Compact(order.CommissionPaymentNote, 120)}");
+        lines.Add("Thank you.");
+        return smsQueue.TryEnqueue(new SmsNotification(phone, string.Join("\n", lines)));
+    }
+
     public NotificationResult QueueStatusChanged(
         Command order,
         Customer customer,

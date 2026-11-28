@@ -63,8 +63,9 @@ public sealed record OrderResponse(
 public sealed record CommissionResponse(
     Guid OrderId,
     string ReferenceNumber,
-    Guid AdminId,
+    Guid? AdminId,
     string AdminName,
+    string? AdminPhone,
     string? CustomerName,
     DateOnly OrderDate,
     DateTime CreatedAt,
@@ -124,6 +125,9 @@ public static class CommandsEndpoints
             {
                 ReferenceNumber = OrderTracking.NewReferenceNumber(),
                 CreatedByAdminId = creator.Id,
+                CreatedByAdminName = creator.Username,
+                CreatedByAdminRole = creator.Role,
+                CreatedByAdminPhone = creator.Phone,
                 Model = product.Model,
                 Status = "Pending",
                 PaymentStatus = "Unpaid"
@@ -171,9 +175,10 @@ public static class CommandsEndpoints
             var referenceError = await ValidatePaymentReferenceAsync(db, dto.PaymentReference, id, cancellationToken);
             if (referenceError is not null) return Results.BadRequest(referenceError);
 
-            var earnsCommission = command.CreatedByAdminId is not null && await db.AdminUsers.AnyAsync(
-                u => u.Id == command.CreatedByAdminId && u.Role != "Owner",
-                cancellationToken);
+            var earnsCommission = command.CreatedByAdminRole == "Viewer"
+                || (command.CreatedByAdminId is not null && await db.AdminUsers.AnyAsync(
+                    u => u.Id == command.CreatedByAdminId && u.Role == "Viewer",
+                    cancellationToken));
             var nextCommission = earnsCommission
                 ? user.IsInRole("Owner") ? dto.CommissionAmount ?? DefaultCommissionAmount : command.CommissionAmount
                 : 0m;
@@ -181,23 +186,28 @@ public static class CommandsEndpoints
                 return Results.BadRequest("Reduce or reverse the recorded commission payout before lowering the commission.");
 
             Fill(command, dto);
-            if (command.CreatedByAdminId is not null) command.CommissionAmount = nextCommission;
+            command.CommissionAmount = nextCommission;
             command.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
             await realtime.NotifyAsync(["commands", "commissions"], cancellationToken);
             return Results.NoContent();
         });
 
-        g.MapDelete("/{id}", async (Guid id, ProductStoreContext db, CancellationToken cancellationToken) =>
+        g.MapDelete("/{id}", async (
+            Guid id,
+            ProductStoreContext db,
+            AdminChangeNotifier realtime,
+            CancellationToken cancellationToken) =>
         {
             var command = await db.Commands.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
             if (command is null) return Results.NotFound();
-            if (command.Status is "Delivered" or "Shipped")
-                return Results.BadRequest("Shipped and delivered orders are kept as business records and cannot be deleted.");
 
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             await db.CommandItems.Where(i => i.CommandId == id).ExecuteDeleteAsync(cancellationToken);
             db.Commands.Remove(command);
             await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            await realtime.NotifyAsync(["commands", "commissions", "customers"], cancellationToken);
             return Results.NoContent();
         });
 
@@ -336,14 +346,18 @@ public static class CommandsEndpoints
             Guid orderId,
             RecordCommissionPayment dto,
             ProductStoreContext db,
+            OrderNotifications notifications,
             CancellationToken cancellationToken) =>
         {
             var command = await db.Commands.FirstOrDefaultAsync(c => c.Id == orderId, cancellationToken);
             if (command is null) return Results.NotFound();
+            if (command.CommissionRemovedAt is not null)
+                return Results.BadRequest("This commission entry has been removed.");
             if (command.Status == "Cancelled")
                 return Results.BadRequest("Cancelled orders cannot receive a commission payout.");
-            if (command.CreatedByAdminId is null || !await db.AdminUsers.AnyAsync(
-                u => u.Id == command.CreatedByAdminId && u.Role != "Owner", cancellationToken))
+            if (command.CreatedByAdminRole != "Viewer"
+                && (command.CreatedByAdminId is null || !await db.AdminUsers.AnyAsync(
+                    u => u.Id == command.CreatedByAdminId && u.Role == "Viewer", cancellationToken)))
                 return Results.BadRequest("This order is not eligible for a staff commission.");
 
             if (dto.Amount is null) return Results.BadRequest("A payout amount is required.");
@@ -354,14 +368,49 @@ public static class CommandsEndpoints
             if (note?.Length > 1000)
                 return Results.BadRequest("The payout note cannot be longer than 1,000 characters.");
 
+            var wasFullyPaid = command.CommissionAmount > 0
+                && command.CommissionPaidAmount >= command.CommissionAmount;
             command.CommissionPaidAmount = amount;
             command.CommissionPaidAt = amount > 0 ? DateTime.UtcNow : null;
             command.CommissionPaymentNote = note;
             command.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
 
+            if (!wasFullyPaid && command.CommissionAmount > 0 && amount >= command.CommissionAmount)
+            {
+                var recipient = command.CreatedByAdminId is null
+                    ? null
+                    : await db.AdminUsers.AsNoTracking()
+                        .Where(u => u.Id == command.CreatedByAdminId)
+                        .Select(u => new { u.Username, u.Phone })
+                        .SingleOrDefaultAsync(cancellationToken);
+                notifications.QueueCommissionPaid(
+                    command,
+                    recipient?.Username ?? command.CreatedByAdminName,
+                    recipient?.Phone ?? command.CreatedByAdminPhone);
+            }
+
             var response = await QueryCommissions(db, orderId: orderId).SingleAsync(cancellationToken);
             return Results.Ok(response);
+        }).RequireAuthorization("Owner");
+
+        commissions.MapDelete("/{orderId}", async (
+            Guid orderId,
+            ProductStoreContext db,
+            AdminChangeNotifier realtime,
+            CancellationToken cancellationToken) =>
+        {
+            var command = await db.Commands.FirstOrDefaultAsync(c => c.Id == orderId, cancellationToken);
+            if (command is null) return Results.NotFound();
+            if (command.CreatedByAdminRole == "Owner")
+                return Results.BadRequest("Owner orders do not have staff commissions.");
+            if (command.CommissionRemovedAt is not null) return Results.NoContent();
+
+            command.CommissionRemovedAt = DateTime.UtcNow;
+            command.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+            await realtime.NotifyAsync(["commissions"], cancellationToken);
+            return Results.NoContent();
         }).RequireAuthorization("Owner");
     }
 
@@ -372,10 +421,12 @@ public static class CommandsEndpoints
     {
         var query =
             from command in db.Commands.AsNoTracking()
-            join admin in db.AdminUsers.AsNoTracking() on command.CreatedByAdminId equals admin.Id
+            join admin in db.AdminUsers.AsNoTracking() on command.CreatedByAdminId equals admin.Id into adminGroup
+            from admin in adminGroup.DefaultIfEmpty()
             join customer in db.Customers.AsNoTracking() on command.CustomerId equals customer.Id into customerGroup
             from customer in customerGroup.DefaultIfEmpty()
-            where command.CreatedByAdminId != null && admin.Role != "Owner"
+            where command.CommissionRemovedAt == null
+                && (admin.Role == "Viewer" || (admin == null && command.CreatedByAdminRole == "Viewer"))
                 && (viewerAdminId == null || admin.Id == viewerAdminId)
                 && (orderId == null || command.Id == orderId)
             orderby command.CreatedAt descending, command.Id descending
@@ -383,7 +434,8 @@ public static class CommandsEndpoints
                 command.Id,
                 command.ReferenceNumber,
                 admin.Id,
-                admin.Username,
+                admin.Username ?? command.CreatedByAdminName ?? "Former admin",
+                admin.Phone ?? command.CreatedByAdminPhone,
                 customer.FullName,
                 command.Date,
                 command.CreatedAt,
@@ -425,8 +477,8 @@ public static class CommandsEndpoints
                 customer.Email,
                 customer.Phone,
                 command.CreatedByAdminId,
-                creator.Username,
-                creator.Role,
+                creator.Username ?? command.CreatedByAdminName,
+                creator.Role ?? command.CreatedByAdminRole,
                 command.CommissionAmount,
                 command.ProductId,
                 command.Model,

@@ -26,6 +26,7 @@ protected override void OnModelCreating(ModelBuilder b)
     b.Entity<AdminUser>(e =>
     {
         e.Property(u => u.Username).HasMaxLength(100);
+        e.Property(u => u.Phone).HasMaxLength(20);
         e.HasIndex(u => u.Username).IsUnique();
     });
     b.Entity<Command>(e =>
@@ -36,10 +37,13 @@ protected override void OnModelCreating(ModelBuilder b)
         e.Property(c => c.CommissionAmount).HasPrecision(18, 2);
         e.Property(c => c.CommissionPaidAmount).HasPrecision(18, 2);
         e.Property(c => c.CommissionPaymentNote).HasMaxLength(1000);
+        e.Property(c => c.CreatedByAdminName).HasMaxLength(100);
+        e.Property(c => c.CreatedByAdminRole).HasMaxLength(20);
+        e.Property(c => c.CreatedByAdminPhone).HasMaxLength(20);
         e.HasOne<ProductStore.Api.Models.AdminUser>()
             .WithMany()
             .HasForeignKey(c => c.CreatedByAdminId)
-            .OnDelete(DeleteBehavior.Restrict);
+            .OnDelete(DeleteBehavior.SetNull);
         e.HasIndex(c => c.PaymentReference)
             .IsUnique()
             .HasFilter("\"PaymentReference\" IS NOT NULL AND \"PaymentReference\" <> ''");
