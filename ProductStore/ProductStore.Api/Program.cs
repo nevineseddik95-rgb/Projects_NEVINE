@@ -52,6 +52,7 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy("Staff", p => p.RequireRole("Owner", "Viewer"));      // can look at everything
 
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<AdminChangeNotifier>();
 builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 builder.Services.AddSingleton<EmailNotificationQueue>();
 builder.Services.AddHostedService<EmailNotificationWorker>();
@@ -176,8 +177,8 @@ app.Use(async (ctx, next) =>
         };
         if (changed.Length > 0)
         {
-            var hub = ctx.RequestServices.GetRequiredService<IHubContext<AdminHub>>();
-            await hub.Clients.All.SendAsync("changed", changed);
+            var notifier = ctx.RequestServices.GetRequiredService<AdminChangeNotifier>();
+            await notifier.NotifyAsync(changed, ctx.RequestAborted);
         }
     }
 });

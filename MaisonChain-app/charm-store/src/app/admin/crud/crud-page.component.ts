@@ -3,7 +3,7 @@ import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { debounceTime, finalize } from 'rxjs';
+import { debounceTime, finalize, timer } from 'rxjs';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ImageFallbackDirective } from '../../core/image-fallback.directive';
@@ -34,6 +34,7 @@ export class CrudPageComponent implements OnInit {
   viewOnly = false;
 
   rows: any[] = [];
+  newOrderIds = new Set<string>();
   lookups: Record<string, any[]> = {};
   search = '';
   editing: any = null;
@@ -57,6 +58,10 @@ export class CrudPageComponent implements OnInit {
   sortKey = '';
   sortDir: 'asc' | 'desc' = 'asc';
   private previousBodyOverflow = '';
+  private knownIds = new Set<string>();
+  private loadedOnce = false;
+  private loadSequence = 0;
+  private highlightTimer?: ReturnType<typeof setTimeout>;
 
   get locale(): string { return this.language.locale(); }
   get singular(): string { return this.t(this.cfg.singular); }
@@ -66,6 +71,9 @@ export class CrudPageComponent implements OnInit {
   t(key: string, params: TranslationParams = {}): string { return this.language.t(key, params); }
 
   ngOnInit(): void {
+    this.destroyRef.onDestroy(() => {
+      if (this.highlightTimer) clearTimeout(this.highlightTimer);
+    });
     this.load();
     this.clearFilters();
     this.loadLookups();
@@ -85,13 +93,41 @@ export class CrudPageComponent implements OnInit {
       if (all || res.includes(this.cfg.endpoint)) this.load();
       if (all || this.cfg.fields.some(f => f.lookup && res.includes(f.lookup))) this.loadLookups();
     });
+
+    if (this.cfg.endpoint === 'commands') {
+      timer(10000, 10000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.load());
+    }
   }
 
   load(): void {
+    const sequence = ++this.loadSequence;
     this.api.list(this.cfg.endpoint).subscribe({
-      next: r => { this.rows = r; this.error = ''; },
-      error: () => (this.error = this.t('common.loadFailed'))
+      next: rows => {
+        if (sequence !== this.loadSequence) return;
+        const incoming = new Set(rows.map(row => String(row.id)));
+        if (this.cfg.endpoint === 'commands' && this.loadedOnce) {
+          const fresh = rows.filter(row => !this.knownIds.has(String(row.id)));
+          if (fresh.length) this.highlightNewOrders(fresh);
+        }
+        this.rows = rows;
+        this.knownIds = incoming;
+        this.loadedOnce = true;
+        this.error = '';
+      },
+      error: () => {
+        if (sequence === this.loadSequence) this.error = this.t('common.loadFailed');
+      }
     });
+  }
+
+  private highlightNewOrders(rows: any[]): void {
+    for (const row of rows) this.newOrderIds.add(String(row.id));
+    if (this.highlightTimer) clearTimeout(this.highlightTimer);
+    this.highlightTimer = setTimeout(() => this.newOrderIds.clear(), 6000);
+  }
+
+  isNewOrder(row: any): boolean {
+    return this.newOrderIds.has(String(row.id));
   }
 
   private loadLookups(): void {

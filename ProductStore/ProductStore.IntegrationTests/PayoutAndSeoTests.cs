@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading.RateLimiting;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
@@ -17,6 +18,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using productStore.Api.Data;
+using productStore.Api.Endpoints;
 using ProductStore.Api.Endpoints;
 using ProductStore.Api.Models;
 using ProductStore.Api.Services;
@@ -152,6 +154,85 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
         {
             await fixture.RemoveOrderAsync(orderId);
         }
+    }
+
+    [Fact]
+    public async Task Admin_created_order_queues_a_customer_email()
+    {
+        using var response = await SendJson(HttpMethod.Post, "/commands", "Viewer", new
+        {
+            customerId = ApiFixture.CustomerId,
+            productId = ApiFixture.ProductId,
+            genreId = ApiFixture.GenreId,
+            colorId = ApiFixture.ColorId,
+            sizeId = ApiFixture.SizeId,
+            deliveryAddress = "Douala",
+            date = new DateOnly(2026, 11, 28),
+            total = 12500m,
+            note = (string?)null,
+            imageUrl = "/uploads/golden.jpg",
+            depositAmount = 5000m,
+            paymentReference = (string?)null,
+            trackingNumber = (string?)null
+        });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var order = await response.Content.ReadFromJsonAsync<OrderResponse>();
+        Assert.NotNull(order);
+
+        var email = fixture.TryTakeEmail("customer@example.com");
+        Assert.NotNull(email);
+        Assert.Equal("Test Customer", email.ToName);
+        Assert.Contains(order.ReferenceNumber, email.Subject);
+        Assert.Contains("Golden &lt;Bracelet&gt;", email.HtmlBody);
+        Assert.Contains("Douala", email.HtmlBody);
+    }
+
+    [Fact]
+    public async Task Checkout_allows_same_email_with_different_names_and_details()
+    {
+        const string email = "repeat@example.com";
+        var first = await SendJson(HttpMethod.Post, "/checkout", "Owner", new
+        {
+            fullName = "Alice One",
+            email,
+            phone = "+269 321 2345",
+            smsUpdates = false,
+            deliveryAddress = "Douala",
+            depositAmount = 5000m,
+            paymentMethod = "MVola",
+            items = new[] { new { productId = ApiFixture.ProductId, quantity = 1 } }
+        });
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+
+        var second = await SendJson(HttpMethod.Post, "/checkout", "Owner", new
+        {
+            fullName = "Bob Two",
+            email,
+            phone = "+269 321 2346",
+            smsUpdates = false,
+            deliveryAddress = "Yaounde",
+            depositAmount = 5000m,
+            paymentMethod = "MVola",
+            items = new[] { new { productId = ApiFixture.ProductId, quantity = 1 } }
+        });
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+
+        using var customersResponse = await Send(HttpMethod.Get, "/customers", "Owner");
+        Assert.Equal(HttpStatusCode.OK, customersResponse.StatusCode);
+        var customers = await customersResponse.Content.ReadFromJsonAsync<List<productStore.Api.Models.Customer>>();
+        Assert.NotNull(customers);
+        var matching = customers.Where(c => c.Email == email).OrderBy(c => c.FullName).ToList();
+        Assert.Equal(new[] { "Alice One", "Bob Two" }, matching.Select(c => c.FullName));
+        Assert.Equal("Douala", matching[0].Address);
+        Assert.Equal("Yaounde", matching[1].Address);
+        Assert.NotEqual(matching[0].Id, matching[1].Id);
+
+        using var ordersResponse = await Send(HttpMethod.Get, "/commands", "Owner");
+        Assert.Equal(HttpStatusCode.OK, ordersResponse.StatusCode);
+        var orders = await ordersResponse.Content.ReadFromJsonAsync<List<OrderResponse>>();
+        Assert.NotNull(orders);
+        Assert.Contains(orders, order => order.CustomerName == "Alice One" && order.DeliveryAddress == "Douala");
+        Assert.Contains(orders, order => order.CustomerName == "Bob Two" && order.DeliveryAddress == "Yaounde");
     }
 
     [Fact]
@@ -302,6 +383,7 @@ public sealed class ApiFixture : IAsyncLifetime
     public static readonly Guid ViewerOrderId = Guid.Parse("99999999-9999-9999-9999-999999999999");
 
     public HttpClient Client { get; private set; } = null!;
+    public EmailNotificationQueue EmailQueue { get; private set; } = null!;
     private WebApplication app = null!;
     private SqliteConnection connection = null!;
     private string contentRoot = null!;
@@ -335,18 +417,26 @@ public sealed class ApiFixture : IAsyncLifetime
             options.AddPolicy("Owner", policy => policy.RequireRole("Owner"));
             options.AddPolicy("Staff", policy => policy.RequireRole("Owner", "Viewer"));
         });
+        builder.Services.AddSignalR();
+        builder.Services.AddSingleton<AdminChangeNotifier>();
+        builder.Services.AddRateLimiter(options =>
+            options.AddPolicy("checkout", _ => RateLimitPartition.GetNoLimiter<string>("test")));
         builder.Services.AddSingleton<EmailNotificationQueue>();
         builder.Services.AddSingleton<SmsNotificationQueue>();
         builder.Services.AddSingleton<OrderNotifications>();
 
         app = builder.Build();
+        EmailQueue = app.Services.GetRequiredService<EmailNotificationQueue>();
         app.UsePathBase("/api");
         app.UseRouting();
         app.UseSearchEngineHeaders();
         app.UseStaticFiles();
+        app.UseRateLimiter();
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapCommandsEndpoints();
+        app.MapCheckoutEndpoints();
+        app.MapCustomersEndpoints();
         app.MapProductsEndpoints();
         app.MapSeoEndpoints();
         await app.StartAsync();
@@ -379,6 +469,15 @@ public sealed class ApiFixture : IAsyncLifetime
             Command(Guid.NewGuid(), "BS-OWNER", OwnerId, 200m, "Pending", 0m),
             Command(Guid.NewGuid(), "BS-CANCELLED", OtherViewerId, 40m, "Cancelled", 2m));
         await db.SaveChangesAsync();
+    }
+
+    public EmailNotification? TryTakeEmail(string recipient)
+    {
+        while (EmailQueue.TryRead(out var notification))
+        {
+            if (notification.ToEmail == recipient) return notification;
+        }
+        return null;
     }
 
     public async Task<Guid> AddOrderAsync(Guid adminId, decimal total, string status, decimal paidAmount)

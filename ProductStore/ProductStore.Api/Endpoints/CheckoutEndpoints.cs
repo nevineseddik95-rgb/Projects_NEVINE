@@ -47,6 +47,7 @@ public static class CheckoutEndpoints
             IConfiguration config,
             EmailNotificationQueue emailQueue,
             OrderNotifications notifications,
+            AdminChangeNotifier realtime,
             CancellationToken cancellationToken) =>
         {
             var name = (req.FullName ?? "").Trim();
@@ -85,10 +86,13 @@ public static class CheckoutEndpoints
             if (deposit > total)
                 return Results.BadRequest("The deposit cannot be more than the total.");
 
+            var normalizedName = name.ToLowerInvariant();
             var customer = emailAddress.Length > 0
-                ? await db.Customers.FirstOrDefaultAsync(c => c.Email.ToLower() == emailAddress, cancellationToken)
+                ? await db.Customers.FirstOrDefaultAsync(c =>
+                    c.Email.ToLower() == emailAddress && c.FullName.ToLower() == normalizedName, cancellationToken)
                 : null;
-            customer ??= await db.Customers.FirstOrDefaultAsync(c => c.Phone == phone, cancellationToken);
+            customer ??= await db.Customers.FirstOrDefaultAsync(c =>
+                c.Phone == phone && c.FullName.ToLower() == normalizedName, cancellationToken);
 
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             if (customer is null)
@@ -108,6 +112,9 @@ public static class CheckoutEndpoints
             {
                 if (emailAddress.Length > 0 && !string.Equals(customer.Email, emailAddress, StringComparison.OrdinalIgnoreCase))
                     customer.Email = emailAddress;
+                customer.FullName = name;
+                customer.Phone = phone;
+                customer.Address = req.DeliveryAddress.Trim();
                 customer.SmsUpdates = req.SmsUpdates;
                 await db.SaveChangesAsync(cancellationToken);
             }
@@ -152,6 +159,7 @@ public static class CheckoutEndpoints
             NotifyAdmin(emailQueue, config,
                 $"New order {order.ReferenceNumber} - {summary}",
                 BuildAdminNewOrderEmail(order, name, emailAddress.Length > 0 ? emailAddress : "(not given)", phone));
+            await realtime.NotifyAsync(["commands", "customers", "commissions"], cancellationToken);
 
             return Results.Ok(new
             {
@@ -176,6 +184,7 @@ public static class CheckoutEndpoints
             IConfiguration config,
             EmailNotificationQueue emailQueue,
             OrderNotifications notifications,
+            AdminChangeNotifier realtime,
             CancellationToken cancellationToken) =>
         {
             var transactionId = (notice.TransactionId ?? "").Trim();
@@ -220,6 +229,7 @@ public static class CheckoutEndpoints
                 $"<p>{WebUtility.HtmlEncode(customer.FullName)} says they paid the deposit for order <strong>{WebUtility.HtmlEncode(order.ReferenceNumber)}</strong> ({Money(order.DepositAmount)}).</p>" +
                 $"<p>Transaction ID: <strong>{WebUtility.HtmlEncode(order.PaymentReference)}</strong></p>" +
                 "<p>Check it in your MVola statement, then press <em>Confirm deposit</em> on the admin Orders page.</p>");
+            await realtime.NotifyAsync(["commands"], cancellationToken);
 
             return Results.Ok(new
             {

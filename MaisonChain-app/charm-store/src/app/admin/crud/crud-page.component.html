@@ -94,7 +94,7 @@
       </thead>
       <tbody>
         @for (r of filtered; track r.id) {
-          <tr>
+          <tr [class.new-row]="isNewOrder(r)">
             @for (f of visibleListFields; track f.key) {
               <td [class.num]="f.type === 'money'"
                   [class.nowrap]="f.type === 'date' || f.type === 'datetime' || f.key === 'referenceNumber' || f.key === 'productId' || f.key === 'model'"
@@ -147,7 +147,7 @@
 } @else {
   <div class="record-grid" [class.compact]="density === 'compact'">
     @for (r of filtered; track r.id) {
-      <article class="record-card">
+      <article class="record-card" [class.new-row]="isNewOrder(r)">
         <div class="record-card-head">
           <div>
             <p class="muted">{{ singular }}</p>

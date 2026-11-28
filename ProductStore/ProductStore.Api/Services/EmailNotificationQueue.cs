@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
 
 namespace ProductStore.Api.Services;
@@ -15,6 +16,8 @@ public sealed class EmailNotificationQueue
         });
 
     public bool TryEnqueue(EmailNotification notification) => _channel.Writer.TryWrite(notification);
+
+    public bool TryRead([NotNullWhen(true)] out EmailNotification? notification) => _channel.Reader.TryRead(out notification);
 
     public IAsyncEnumerable<EmailNotification> ReadAllAsync(CancellationToken cancellationToken) =>
         _channel.Reader.ReadAllAsync(cancellationToken);

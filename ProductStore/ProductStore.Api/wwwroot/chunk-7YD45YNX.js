@@ -1,0 +1,1 @@
+import{B as e,F as i,bb as n}from"./chunk-XD7EZZUV.js";var s=class a{language=e(n);transform(t,r={}){return this.language.t(t,r)}static \u0275fac=function(r){return new(r||a)};static \u0275pipe=i({name:"translate",type:a,pure:!1,standalone:!0})};export{s as a};

@@ -1,5 +1,5 @@
 import { CrudConfig, ORDER_STATUSES, PAYMENT_STATUSES } from '../core/models';
-import { Language, translate } from '../core/translations';
+import { initialLanguage, translate } from '../core/translations';
 
 export const PRODUCTS: CrudConfig = {
   title: 'admin.products', singular: 'admin.product', endpoint: 'products',
@@ -31,19 +31,11 @@ export const SIZES: CrudConfig = {
 
 const depositConfirmed = (row: any) => row.paymentStatus === 'Deposit paid' || row.paymentStatus === 'Paid in full';
 
-function currentLanguage(): Language {
-  try {
-    return localStorage.getItem('charm_language') === 'en' ? 'en' : 'fr';
-  } catch {
-    return 'fr';
-  }
-}
-
 const orderSmsHref = (row: any): string | null => {
   const phone = String(row.customerPhone ?? '').replace(/[^\d+]/g, '');
   if (!phone) return null;
 
-  const language = currentLanguage();
+  const language = initialLanguage();
   const t = (key: string, params: Record<string, string | number> = {}) => translate(language, key, params);
   const money = (value: any) => {
     const locale = language === 'fr' ? 'fr-FR' : 'en-US';

@@ -101,6 +101,9 @@ public static class CommandsEndpoints
             SaveCommand dto,
             ProductStoreContext db,
             ClaimsPrincipal user,
+            IConfiguration config,
+            OrderNotifications notifications,
+            AdminChangeNotifier realtime,
             CancellationToken cancellationToken) =>
         {
             var product = await db.Products.FindAsync([dto.ProductId], cancellationToken);
@@ -131,6 +134,13 @@ public static class CommandsEndpoints
             db.Commands.Add(command);
             await db.SaveChangesAsync(cancellationToken);
             var response = await QueryOrders(db, command.Id).SingleAsync(cancellationToken);
+            var customer = await db.Customers.FindAsync([command.CustomerId], cancellationToken);
+            if (customer is not null)
+            {
+                var instructions = config[$"Payment:Instructions:{command.PaymentMethod}"] ?? "";
+                notifications.QueueOrderCreated(command, customer, instructions);
+            }
+            await realtime.NotifyAsync(["commands", "commissions"], cancellationToken);
             return Results.Created($"/commands/{command.Id}", response);
         });
 

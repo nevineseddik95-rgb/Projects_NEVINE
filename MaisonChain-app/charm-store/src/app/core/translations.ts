@@ -809,7 +809,8 @@ export function translate(language: Language, key: string, params: TranslationPa
 export function initialLanguage(): Language {
   try {
     const saved = localStorage.getItem('charm_language');
-    if (saved === 'en' || saved === 'fr') return saved;
+    const explicitlyChosen = localStorage.getItem('charm_language_explicit') === '1';
+    if (explicitlyChosen && (saved === 'en' || saved === 'fr')) return saved;
   } catch {
     // Storage can be unavailable in private browsing.
   }

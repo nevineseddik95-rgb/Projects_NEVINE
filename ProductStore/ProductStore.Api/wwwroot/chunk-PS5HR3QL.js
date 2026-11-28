@@ -1,1 +1,0 @@
-import{B as i,F as t,ab as a}from"./chunk-VVQB72ZG.js";var m=class n{language=i(a);transform(e){if(e==null||e==="")return"";let r=Number(e);return isNaN(r)?"":new Intl.NumberFormat(this.language.locale(),{maximumFractionDigits:0}).format(r)+" KMF"}static \u0275fac=function(r){return new(r||n)};static \u0275pipe=t({name:"kmf",type:n,pure:!1,standalone:!0})};export{m as a};

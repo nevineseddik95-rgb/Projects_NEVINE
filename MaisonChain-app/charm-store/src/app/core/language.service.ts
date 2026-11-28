@@ -22,6 +22,12 @@ export class LanguageService {
 
   setLanguage(language: Language): void {
     this.language.set(language);
+    try {
+      localStorage.setItem('charm_language', language);
+      localStorage.setItem('charm_language_explicit', '1');
+    } catch {
+      return;
+    }
   }
 
   toggle(): void {
