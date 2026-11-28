@@ -1,4 +1,4 @@
-import { Component, DestroyRef, HostListener, inject } from '@angular/core';
+import { Component, DestroyRef, ElementRef, HostListener, ViewChild, inject } from '@angular/core';
 import { AsyncPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
@@ -25,12 +25,19 @@ interface Note {
   imports: [AsyncPipe, RouterOutlet, RouterLink, RouterLinkActive, LanguageSwitcherComponent, TranslatePipe],
   template: `
     <div class="admin">
-      <nav class="sidebar" [attr.aria-label]="'admin.navigation' | translate">
-        <a class="brand" routerLink="/admin">Beauty & Shine</a>
+      <nav id="admin-sidebar" #sidebar class="sidebar" [class.mobile-open]="menuOpen" [attr.aria-label]="'admin.navigation' | translate">
+        <div class="sidebar-head">
+          <a class="brand" routerLink="/admin" (click)="closeMobileMenu()">Beauty & Shine</a>
+          <button class="sidebar-close" type="button" [attr.aria-label]="'admin.closeMenu' | translate" (click)="closeMobileMenu(true)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18"/>
+            </svg>
+          </button>
+        </div>
         <ul>
           @for (l of visibleLinks; track l.path) {
             <li>
-              <a [routerLink]="l.path" routerLinkActive="active">
+              <a [routerLink]="l.path" routerLinkActive="active" (click)="closeMobileMenu()">
                 <span>{{ t(l.label) }}</span>
                 @if (l.path === '/admin/orders') {
                   @if (newOrders > 0) { <span class="pill pill-new" [title]="'admin.newOrdersTitle' | translate">{{ t('admin.newOrders', { count: newOrders }) }}</span> }
@@ -42,13 +49,23 @@ interface Note {
         </ul>
         <div class="sidebar-foot">
           <span class="who">{{ auth.username }} · {{ t(auth.isOwner() ? 'admin.owner' : 'admin.viewer') }}</span>
-          <a routerLink="/" target="_blank">{{ 'admin.viewStorefront' | translate }}</a>
-          <button class="btn btn-ghost" type="button" (click)="auth.logout()">{{ 'admin.signOut' | translate }}</button>
+          <a routerLink="/" target="_blank" (click)="closeMobileMenu()">{{ 'admin.viewStorefront' | translate }}</a>
+          <button class="btn btn-ghost" type="button" (click)="auth.logout(); closeMobileMenu()">{{ 'admin.signOut' | translate }}</button>
         </div>
       </nav>
 
+      @if (menuOpen) {
+        <button class="sidebar-backdrop" type="button" [attr.aria-label]="'admin.closeMenu' | translate" (click)="closeMobileMenu(true)"></button>
+      }
+
       <main class="content">
         <div class="topbar">
+          <button #menuToggle class="menu-toggle" type="button" aria-controls="admin-sidebar" [attr.aria-expanded]="menuOpen"
+                  [attr.aria-label]="(menuOpen ? 'admin.closeMenu' : 'admin.openMenu') | translate" (click)="toggleMenu()">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M4 7h16M4 12h16M4 17h16"/>
+            </svg>
+          </button>
           <app-language-switcher />
           @if (realtime.state$ | async; as live) {
             <span class="live-state" [class.offline]="live !== 'online'">
@@ -91,6 +108,9 @@ interface Note {
   `
 })
 export class AdminLayoutComponent {
+  @ViewChild('sidebar') private sidebar?: ElementRef<HTMLElement>;
+  @ViewChild('menuToggle') private menuToggle?: ElementRef<HTMLButtonElement>;
+
   auth = inject(AuthService);
   realtime = inject(RealtimeService);
   language = inject(LanguageService);
@@ -105,6 +125,7 @@ export class AdminLayoutComponent {
   newOrders = 0;
   toCheck = 0;
   open = false;
+  menuOpen = false;
   toast = '';
 
   private orders: any[] = [];
@@ -156,6 +177,7 @@ export class AdminLayoutComponent {
       filter(event => event instanceof NavigationEnd),
       takeUntilDestroyed()
     ).subscribe(event => {
+      this.menuOpen = false;
       if ((event as NavigationEnd).url.startsWith('/admin/orders')) {
         this.markSeen();
         this.markPaymentsRead(this.orders.filter(o => o.paymentStatus === 'Payment submitted').map(o => String(o.id)));
@@ -164,7 +186,31 @@ export class AdminLayoutComponent {
     });
   }
 
-  @HostListener('document:keydown.escape') closeMenu(): void { this.open = false; }
+  toggleMenu(): void {
+    this.open = false;
+    this.menuOpen = !this.menuOpen;
+    if (this.menuOpen) {
+      setTimeout(() => this.sidebar?.nativeElement.querySelector<HTMLAnchorElement>('a')?.focus(), 0);
+    } else {
+      this.menuToggle?.nativeElement.focus();
+    }
+  }
+
+  closeMobileMenu(restoreFocus = false): void {
+    const wasOpen = this.menuOpen;
+    this.menuOpen = false;
+    if (restoreFocus && wasOpen)
+      setTimeout(() => this.menuToggle?.nativeElement.focus(), 0);
+  }
+
+  @HostListener('document:keydown.escape') closeMenu(): void {
+    this.open = false;
+    if (this.menuOpen) this.closeMobileMenu(true);
+  }
+
+  @HostListener('window:resize') closeDesktopMenu(): void {
+    if (window.innerWidth > 800) this.menuOpen = false;
+  }
 
   openNote(note: Note): void {
     if (note.kind === 'payment') this.markPaymentsRead([note.key.replace('payment:', '')]);

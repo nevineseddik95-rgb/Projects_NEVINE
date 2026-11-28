@@ -53,7 +53,15 @@ builder.Services.AddAuthorizationBuilder()
 
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<AdminChangeNotifier>();
-builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+var resendConfigured = ResendEmailSender.IsConfigured(builder.Configuration);
+if (resendConfigured)
+    builder.Services.AddHttpClient<IEmailSender, ResendEmailSender>(client =>
+    {
+        client.BaseAddress = new Uri("https://api.resend.com/");
+        client.Timeout = TimeSpan.FromSeconds(20);
+    });
+else
+    builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
 builder.Services.AddSingleton<EmailNotificationQueue>();
 builder.Services.AddHostedService<EmailNotificationWorker>();
 builder.Services.AddSingleton<SmsNotificationQueue>();
@@ -92,10 +100,17 @@ builder.AddProductStoreDb();
 
 var app = builder.Build();
 
-var emailEnabled = SmtpEmailSender.IsConfigured(builder.Configuration);
+var emailProvider = resendConfigured ? "Resend" : "SMTP";
+var emailEnabled = resendConfigured
+    ? ResendEmailSender.CanSendToCustomers(builder.Configuration)
+    : SmtpEmailSender.IsConfigured(builder.Configuration);
 app.Logger.LogInformation(
-    "Email notifications are {State}.",
-    emailEnabled ? "configured" : "not configured; set Email__Host, Email__FromAddress, Email__Username and Email__Password");
+    "Email notifications are {State} using {Provider}.",
+    emailEnabled ? "configured" : "not ready",
+    emailProvider);
+if (resendConfigured && !emailEnabled)
+    app.Logger.LogWarning(
+        "Resend is using its restricted resend.dev test sender. Verify a domain in Resend and set Resend__From to an address on that domain to email customers.");
 
 // ---------- database: tables, starting lists, owner account ----------
 
@@ -191,7 +206,8 @@ app.MapGet("/notifications/options", (IConfiguration config) =>
     Results.Ok(new
     {
         smsEnabled = SmsSettings.IsEnabled(config),
-        emailEnabled = SmtpEmailSender.IsConfigured(config)
+        emailEnabled,
+        emailProvider
     }));
 
 app.MapAuthEndpoints();

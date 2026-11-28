@@ -145,7 +145,15 @@ export class CrudPageComponent implements OnInit {
     const visible = new Set(this.visibleKeys);
     return this.listFields.filter(f => visible.has(f.key));
   }
-  get formFields(): Field[] { return this.cfg.fields.filter(f => !f.readonly && (f.showInForm ?? f.showInDetail !== false)); }
+  get formFields(): Field[] {
+    return this.cfg.fields.filter(f => !f.readonly
+      && (!f.ownerOnly || this.canEdit)
+      && this.isFormFieldVisible(f));
+  }
+  private isFormFieldVisible(field: Field): boolean {
+    if (typeof field.showInForm === 'function') return field.showInForm(this.editing ?? {}, this.isNew);
+    return field.showInForm ?? field.showInDetail !== false;
+  }
   get readonlyFields(): Field[] { return this.cfg.fields.filter(f => f.readonly && f.showInDetail !== false); }
   get detailFields(): Field[] { return this.cfg.fields.filter(f => f.showInDetail !== false); }
   get filterFields(): Field[] {
@@ -306,6 +314,7 @@ export class CrudPageComponent implements OnInit {
   openNew(): void {
     if (!this.canCreate) return;
     this.editing = {};
+    this.isNew = true;
     for (const f of this.cfg.fields) {
       if (f.defaultValue !== undefined) this.editing[f.key] = f.defaultValue;
     }
@@ -315,7 +324,6 @@ export class CrudPageComponent implements OnInit {
       else if (f.type === 'select' && f.options) this.editing[f.key] = f.options[0].value;
       else if (f.type === 'select') this.editing[f.key] = null;
     }
-    this.isNew = true;
     this.viewOnly = false;
     this.error = '';
     this.lockBody();
@@ -332,10 +340,10 @@ export class CrudPageComponent implements OnInit {
   openEdit(row: any): void {
     if (!this.canEditRow(row)) return;
     this.editing = { ...row };
+    this.isNew = false;
     for (const f of this.formFields) {
       if (f.type === 'date' && this.editing[f.key]) this.editing[f.key] = String(this.editing[f.key]).slice(0, 10);
     }
-    this.isNew = false;
     this.viewOnly = false;
     this.error = '';
     this.lockBody();

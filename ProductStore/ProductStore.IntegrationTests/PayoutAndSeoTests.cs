@@ -101,7 +101,7 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
         var initial = await GetCommissions("Owner");
         var row = Assert.Single(initial, row => row.Status == "Pending");
         Assert.Equal("Unpaid", row.PayoutStatus);
-        Assert.Equal(5.01m, row.OutstandingAmount);
+        Assert.Equal(500m, row.OutstandingAmount);
 
         var partial = await SendJson(HttpMethod.Post, $"/commissions/{row.OrderId}/payment", "Owner",
             new { amount = 2m, note = "Cash partial" });
@@ -109,13 +109,13 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
         var partialBody = await partial.Content.ReadFromJsonAsync<CommissionResponse>();
         Assert.NotNull(partialBody);
         Assert.Equal(2m, partialBody.PaidAmount);
-        Assert.Equal(3.01m, partialBody.OutstandingAmount);
+        Assert.Equal(498m, partialBody.OutstandingAmount);
         Assert.Equal("PartiallyPaid", partialBody.PayoutStatus);
         Assert.NotNull(partialBody.PaidAt);
         Assert.Equal("Cash partial", partialBody.PaymentNote);
 
         var full = await SendJson(HttpMethod.Post, $"/commissions/{row.OrderId}/payment", "Owner",
-            new { amount = 5.01m, note = "Cash complete" });
+            new { amount = 500m, note = "Cash complete" });
         Assert.Equal(HttpStatusCode.OK, full.StatusCode);
         var fullBody = await full.Content.ReadFromJsonAsync<CommissionResponse>();
         Assert.NotNull(fullBody);
@@ -129,7 +129,7 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
         Assert.NotNull(reversedBody);
         Assert.Equal("Unpaid", reversedBody.PayoutStatus);
         Assert.Equal(0m, reversedBody.PaidAmount);
-        Assert.Equal(5.01m, reversedBody.OutstandingAmount);
+        Assert.Equal(500m, reversedBody.OutstandingAmount);
         Assert.Null(reversedBody.PaidAt);
     }
 
@@ -140,7 +140,7 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
         foreach (var body in new object[]
                  {
                      new { amount = -0.01m },
-                     new { amount = 5.02m },
+                     new { amount = 500.01m },
                      new { note = "Missing amount" },
                      new { amount = 1m, note = new string('x', 1001) }
                  })
@@ -182,33 +182,21 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
     }
 
     [Fact]
-    public async Task Lowering_an_order_below_its_paid_commission_is_rejected()
+    public async Task Commission_edits_enforce_owner_defaults_and_paid_amount_limits()
     {
         var orderId = await fixture.AddOrderAsync(ApiFixture.ViewerId, 100m, "Pending", 3m);
         try
         {
-            var dto = new
-            {
-                customerId = ApiFixture.CustomerId,
-                productId = ApiFixture.ProductId,
-                genreId = ApiFixture.GenreId,
-                colorId = ApiFixture.ColorId,
-                sizeId = ApiFixture.SizeId,
-                deliveryAddress = "Douala",
-                date = new DateOnly(2026, 11, 28),
-                total = 10m,
-                note = (string?)null,
-                imageUrl = "/uploads/test.jpg",
-                depositAmount = 4m,
-                paymentReference = (string?)null,
-                trackingNumber = (string?)null
-            };
+            var dto = ApiFixture.OrderSave(10m, 2m);
+            var negative = await SendJson(HttpMethod.Put, $"/commands/{orderId}", "Owner",
+                dto with { CommissionAmount = -1m });
+            Assert.Equal(HttpStatusCode.BadRequest, negative.StatusCode);
 
             var rejected = await SendJson(HttpMethod.Put, $"/commands/{orderId}", "Owner", dto);
             Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
 
             var accepted = await SendJson(HttpMethod.Put, $"/commands/{orderId}", "Owner",
-                dto with { total = 200m });
+                dto with { Total = 200m, CommissionAmount = 10m });
             Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
 
             var rows = await GetCommissions("Owner");
@@ -216,10 +204,74 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
             Assert.Equal(10m, updated.CommissionAmount);
             Assert.Equal(3m, updated.PaidAmount);
             Assert.Equal("PartiallyPaid", updated.PayoutStatus);
+
+            var reset = await SendJson(HttpMethod.Put, $"/commands/{orderId}", "Owner",
+                dto with { Total = 300m, CommissionAmount = null });
+            Assert.Equal(HttpStatusCode.NoContent, reset.StatusCode);
+            var resetRow = Assert.Single(await GetCommissions("Owner"), row => row.OrderId == orderId);
+            Assert.Equal(500m, resetRow.CommissionAmount);
+            Assert.Equal(497m, resetRow.OutstandingAmount);
         }
         finally
         {
             await fixture.RemoveOrderAsync(orderId);
+        }
+    }
+
+    [Fact]
+    public async Task Viewer_creation_cannot_override_the_default_commission()
+    {
+        using var response = await SendJson(HttpMethod.Post, "/commands", "Viewer", ApiFixture.OrderSave(12500m, 1m));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var order = await response.Content.ReadFromJsonAsync<OrderResponse>();
+        Assert.NotNull(order);
+        try
+        {
+            Assert.Equal(500m, order.CommissionAmount);
+            Assert.Equal("Viewer", order.CreatedByAdminRole);
+            Assert.NotNull(fixture.TryTakeEmail("customer@example.com"));
+        }
+        finally
+        {
+            await fixture.RemoveOrderAsync(order.Id);
+        }
+    }
+
+    [Fact]
+    public async Task Owner_creation_has_no_commission_and_only_owner_can_edit_staff_commission()
+    {
+        using var created = await SendJson(HttpMethod.Post, "/commands", "Owner", ApiFixture.OrderSave(12500m, 900m));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var ownerOrder = await created.Content.ReadFromJsonAsync<OrderResponse>();
+        Assert.NotNull(ownerOrder);
+        try
+        {
+            Assert.Equal(0m, ownerOrder.CommissionAmount);
+            Assert.NotNull(fixture.TryTakeEmail("customer@example.com"));
+        }
+        finally
+        {
+            await fixture.RemoveOrderAsync(ownerOrder.Id);
+        }
+
+        var staffOrderId = await fixture.AddOrderAsync(ApiFixture.ViewerId, 12500m, "Pending", 0m);
+        try
+        {
+            var ownerEdit = await SendJson(HttpMethod.Put, $"/commands/{staffOrderId}", "Owner",
+                ApiFixture.OrderSave(15000m, 725m));
+            Assert.Equal(HttpStatusCode.NoContent, ownerEdit.StatusCode);
+
+            var viewerEdit = await SendJson(HttpMethod.Put, $"/commands/{staffOrderId}", "Viewer",
+                ApiFixture.OrderSave(16000m, 1m));
+            Assert.Equal(HttpStatusCode.NoContent, viewerEdit.StatusCode);
+
+            var updated = Assert.Single(await GetCommissions("Owner"), row => row.OrderId == staffOrderId);
+            Assert.Equal(725m, updated.CommissionAmount);
+            Assert.Equal(16000m, updated.OrderTotal);
+        }
+        finally
+        {
+            await fixture.RemoveOrderAsync(staffOrderId);
         }
     }
 
@@ -533,9 +585,9 @@ public sealed class ApiFixture : IAsyncLifetime
                 ImageUrl = "/uploads/golden.jpg"
             });
         db.Commands.AddRange(
-            Command(ViewerOrderId, "BS-VIEWER", ViewerId, 100.20m, "Pending", 5.01m),
+            Command(ViewerOrderId, "BS-VIEWER", ViewerId, 100.20m, "Pending", 500m),
             Command(Guid.NewGuid(), "BS-OWNER", OwnerId, 200m, "Pending", 0m),
-            Command(Guid.NewGuid(), "BS-CANCELLED", OtherViewerId, 40m, "Cancelled", 2m));
+            Command(Guid.NewGuid(), "BS-CANCELLED", OtherViewerId, 40m, "Cancelled", 500m));
         await db.SaveChangesAsync();
     }
 
@@ -560,7 +612,7 @@ public sealed class ApiFixture : IAsyncLifetime
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ProductStoreContext>();
         var command = Command(Guid.NewGuid(), $"BS-{Guid.NewGuid():N}"[..14], adminId, total, status,
-            decimal.Round(total * 0.05m, 2, MidpointRounding.AwayFromZero));
+            adminId == OwnerId ? 0m : 500m);
         command.CommissionPaidAmount = paidAmount;
         command.CommissionPaidAt = paidAmount > 0 ? DateTime.UtcNow : null;
         db.Commands.Add(command);
@@ -585,6 +637,20 @@ public sealed class ApiFixture : IAsyncLifetime
         if (!string.IsNullOrEmpty(contentRoot) && Directory.Exists(contentRoot))
             Directory.Delete(contentRoot, true);
     }
+
+    public static SaveCommand OrderSave(decimal total, decimal? commissionAmount = null) => new(
+        CustomerId,
+        ProductId,
+        GenreId,
+        ColorId,
+        SizeId,
+        "Douala",
+        new DateOnly(2026, 11, 28),
+        total,
+        null,
+        "/uploads/test.jpg",
+        0m,
+        CommissionAmount: commissionAmount);
 
     private static productStore.Api.Models.Command Command(Guid id, string reference, Guid adminId, decimal total, string status,
         decimal commission) => new()

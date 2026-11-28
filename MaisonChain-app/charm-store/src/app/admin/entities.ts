@@ -89,6 +89,11 @@ export const COMMANDS: CrudConfig = {
     { key: 'statusNote', label: 'common.lastStatusUpdate', type: 'textarea', readonly: true, hideInList: true },
     { key: 'trackingNumber', label: 'common.trackingNumber', type: 'text', readonly: true, hideInList: true },
     { key: 'total', label: 'common.total', type: 'money', required: true },
+    {
+      key: 'commissionAmount', label: 'commissions.orderCommission', type: 'money', required: true,
+      defaultValue: 500, hideInList: true, ownerOnly: true,
+      showInForm: (row, isNew) => !isNew && row.createdByAdminRole === 'Viewer'
+    },
     { key: 'depositAmount', label: 'common.deposit', type: 'money' },
     { key: 'paymentStatus', label: 'common.payment', type: 'select', readonly: true, options: PAYMENT_STATUSES.map(value => ({ value, label: value })) },
     { key: 'paymentMethod', label: 'common.payMethod', type: 'text', readonly: true, hideInList: true },

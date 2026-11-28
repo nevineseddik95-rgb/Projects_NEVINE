@@ -19,7 +19,8 @@ public record SaveCommand(
     string? ImageUrl,
     decimal DepositAmount = 0,
     string? PaymentReference = null,
-    string? TrackingNumber = null);
+    string? TrackingNumber = null,
+    decimal? CommissionAmount = null);
 
 public record ChangeOrderStatus(string Status, string? Note = null, string? TrackingNumber = null);
 
@@ -34,6 +35,7 @@ public sealed record OrderResponse(
     string? CustomerPhone,
     Guid? CreatedByAdminId,
     string? CreatedByAdminName,
+    string? CreatedByAdminRole,
     decimal CommissionAmount,
     Guid ProductId,
     string Model,
@@ -69,7 +71,6 @@ public sealed record CommissionResponse(
     string Status,
     string PaymentStatus,
     decimal OrderTotal,
-    decimal CommissionRate,
     decimal CommissionAmount,
     decimal PaidAmount,
     decimal OutstandingAmount,
@@ -80,7 +81,7 @@ public sealed record CommissionResponse(
 
 public static class CommandsEndpoints
 {
-    private const decimal CommissionRate = 0.05m;
+    private const decimal DefaultCommissionAmount = 500m;
 
     public static void MapCommandsEndpoints(this WebApplication app)
     {
@@ -128,7 +129,7 @@ public static class CommandsEndpoints
                 PaymentStatus = "Unpaid"
             };
             Fill(command, dto);
-            command.CommissionAmount = creator.Role == "Owner" ? 0m : CommissionFor(command.Total);
+            command.CommissionAmount = creator.Role == "Owner" ? 0m : DefaultCommissionAmount;
             if (string.IsNullOrEmpty(command.ImageUrl)) command.ImageUrl = product.ImageUrl;
 
             db.Commands.Add(command);
@@ -144,11 +145,19 @@ public static class CommandsEndpoints
             return Results.Created($"/commands/{command.Id}", response);
         });
 
-        g.MapPut("/{id}", async (Guid id, SaveCommand dto, ProductStoreContext db, CancellationToken cancellationToken) =>
+        g.MapPut("/{id}", async (
+            Guid id,
+            SaveCommand dto,
+            ProductStoreContext db,
+            ClaimsPrincipal user,
+            AdminChangeNotifier realtime,
+            CancellationToken cancellationToken) =>
         {
             var command = await db.Commands.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
             if (command is null) return Results.NotFound();
             if (dto.Total < 0) return Results.BadRequest("The order total cannot be negative.");
+            if (dto.CommissionAmount is < 0)
+                return Results.BadRequest("The commission cannot be negative.");
 
             if (command.ProductId != dto.ProductId)
             {
@@ -165,14 +174,17 @@ public static class CommandsEndpoints
             var earnsCommission = command.CreatedByAdminId is not null && await db.AdminUsers.AnyAsync(
                 u => u.Id == command.CreatedByAdminId && u.Role != "Owner",
                 cancellationToken);
-            var nextCommission = earnsCommission ? CommissionFor(dto.Total) : 0m;
+            var nextCommission = earnsCommission
+                ? user.IsInRole("Owner") ? dto.CommissionAmount ?? DefaultCommissionAmount : command.CommissionAmount
+                : 0m;
             if (command.CommissionPaidAmount > nextCommission)
-                return Results.BadRequest("Reduce or reverse the recorded commission payout before lowering this order total.");
+                return Results.BadRequest("Reduce or reverse the recorded commission payout before lowering the commission.");
 
             Fill(command, dto);
             if (command.CreatedByAdminId is not null) command.CommissionAmount = nextCommission;
             command.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
+            await realtime.NotifyAsync(["commands", "commissions"], cancellationToken);
             return Results.NoContent();
         });
 
@@ -378,7 +390,6 @@ public static class CommandsEndpoints
                 command.Status,
                 command.PaymentStatus,
                 command.Total,
-                CommissionRate,
                 command.Status == "Cancelled" ? 0m : command.CommissionAmount,
                 command.CommissionPaidAmount,
                 command.Status == "Cancelled" || command.CommissionPaidAmount >= command.CommissionAmount
@@ -415,6 +426,7 @@ public static class CommandsEndpoints
                 customer.Phone,
                 command.CreatedByAdminId,
                 creator.Username,
+                creator.Role,
                 command.CommissionAmount,
                 command.ProductId,
                 command.Model,
@@ -441,9 +453,6 @@ public static class CommandsEndpoints
 
         return query;
     }
-
-    private static decimal CommissionFor(decimal total) =>
-        Math.Round(total * CommissionRate, 2, MidpointRounding.AwayFromZero);
 
     private static void Fill(Command command, SaveCommand dto)
     {

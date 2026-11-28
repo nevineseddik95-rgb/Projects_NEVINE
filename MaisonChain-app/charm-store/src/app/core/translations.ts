@@ -255,6 +255,8 @@ const en: Record<string, string> = {
   'login.serverError': 'The server could not be reached. Check that the API is running.',
 
   'admin.navigation': 'Admin',
+  'admin.openMenu': 'Open navigation menu',
+  'admin.closeMenu': 'Close navigation menu',
   'admin.owner': 'owner',
   'admin.viewer': 'order entry',
   'admin.viewStorefront': 'View storefront',
@@ -338,7 +340,7 @@ const en: Record<string, string> = {
   'dashboard.noOrders': 'No orders yet.',
   'dashboard.unknownCustomer': 'Unknown',
 
-  'commissions.subtitle': '5% of each non-cancelled order total created by a non-Owner admin.',
+  'commissions.subtitle': 'Staff orders default to a fixed 500 KMF commission, editable by the Owner. Cancelled orders are excluded.',
   'commissions.orders': 'Commissionable orders',
   'commissions.orderTotal': 'Eligible order total',
   'commissions.due': 'Commission due',
@@ -346,7 +348,7 @@ const en: Record<string, string> = {
   'commissions.reference': 'Order reference',
   'commissions.orderDate': 'Order date',
   'commissions.orderTotalColumn': 'Order total',
-  'commissions.rate': 'Rate',
+  'commissions.orderCommission': 'Commission (default: 500 KMF)',
   'commissions.amount': 'Commission',
   'commissions.eligibility': 'Eligibility',
   'commissions.eligible': 'Eligible',
@@ -654,6 +656,8 @@ const fr: Record<string, string> = {
   'login.serverError': 'Le serveur est inaccessible. Vérifiez que l’API fonctionne.',
 
   'admin.navigation': 'Administration',
+  'admin.openMenu': 'Ouvrir le menu de navigation',
+  'admin.closeMenu': 'Fermer le menu de navigation',
   'admin.owner': 'propriétaire',
   'admin.viewer': 'saisie des commandes',
   'admin.viewStorefront': 'Voir la boutique',
@@ -737,7 +741,7 @@ const fr: Record<string, string> = {
   'dashboard.noOrders': 'Aucune commande pour le moment.',
   'dashboard.unknownCustomer': 'Inconnu',
 
-  'commissions.subtitle': '5 % du total de chaque commande non annulée créée par un administrateur non propriétaire.',
+  'commissions.subtitle': 'Les commandes du personnel ont une commission fixe de 500 KMF par défaut, modifiable par le propriétaire. Les commandes annulées sont exclues.',
   'commissions.orders': 'Commandes commissionnables',
   'commissions.orderTotal': 'Total des commandes éligibles',
   'commissions.due': 'Commission due',
@@ -745,7 +749,7 @@ const fr: Record<string, string> = {
   'commissions.reference': 'Référence de commande',
   'commissions.orderDate': 'Date de commande',
   'commissions.orderTotalColumn': 'Total de la commande',
-  'commissions.rate': 'Taux',
+  'commissions.orderCommission': 'Commission (par défaut : 500 KMF)',
   'commissions.amount': 'Commission',
   'commissions.eligibility': 'Éligibilité',
   'commissions.eligible': 'Éligible',

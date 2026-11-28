@@ -20,7 +20,6 @@ interface CommissionRow {
   status: string;
   paymentStatus: string;
   orderTotal: number;
-  commissionRate: number;
   commissionAmount: number;
   paidAmount: number;
   outstandingAmount: number;
@@ -93,7 +92,6 @@ interface CommissionRow {
             <th>{{ 'commissions.orderDate' | translate }}</th>
             <th>{{ 'common.status' | translate }}</th>
             <th class="num">{{ 'commissions.orderTotalColumn' | translate }}</th>
-            <th class="num">{{ 'commissions.rate' | translate }}</th>
             <th class="num">{{ 'commissions.amount' | translate }}</th>
             <th class="num">{{ 'commissions.paid' | translate }}</th>
             <th class="num">{{ 'commissions.outstanding' | translate }}</th>
@@ -110,7 +108,6 @@ interface CommissionRow {
                 <td>{{ formatDate(r.orderDate) }}</td>
                 <td><span class="badge" [class]="'s-' + r.status">{{ t('status.' + r.status) }}</span></td>
                 <td class="num">{{ formatMoney(r.orderTotal, 2) }}</td>
-                <td class="num">{{ formatPercent(r.commissionRate) }}</td>
                 <td class="num"><strong>{{ formatMoney(r.commissionAmount, 2) }}</strong></td>
                 <td class="num">{{ formatMoney(r.paidAmount, 2) }}</td>
                 <td class="num"><strong>{{ formatMoney(r.outstandingAmount, 2) }}</strong></td>
@@ -204,9 +201,6 @@ export class CommissionsComponent implements OnInit, OnDestroy {
   formatMoney(value: number, maximumFractionDigits = 0): string {
     const amount = Number(value);
     return Number.isFinite(amount) ? new Intl.NumberFormat(this.locale, { maximumFractionDigits }).format(amount) + ' KMF' : '';
-  }
-  formatPercent(value: number): string {
-    return new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 0 }).format(Number(value) || 0);
   }
   get eligibleRows(): CommissionRow[] { return this.rows.filter(r => r.eligible); }
   get commissionTotal(): number { return this.eligibleRows.reduce((sum, r) => sum + Number(r.commissionAmount || 0), 0); }
@@ -310,7 +304,7 @@ export class CommissionsComponent implements OnInit, OnDestroy {
     const headers = [
       this.t('commissions.admin'), this.t('commissions.reference'), this.t('common.customer'),
       this.t('commissions.orderDate'), this.t('common.status'), this.t('commissions.orderTotalColumn'),
-      this.t('commissions.rate'), this.t('commissions.amount'), this.t('commissions.paid'),
+      this.t('commissions.amount'), this.t('commissions.paid'),
       this.t('commissions.outstanding'), this.t('commissions.payoutStatus'), this.t('commissions.paidAt'),
       this.t('commissions.paymentNote')
     ];
@@ -318,7 +312,7 @@ export class CommissionsComponent implements OnInit, OnDestroy {
     for (const r of this.filtered) {
       lines.push([
         r.adminName, r.referenceNumber, r.customerName, r.orderDate, this.t(`status.${r.status}`),
-        r.orderTotal, `${Math.round(r.commissionRate * 100)}%`, r.commissionAmount, r.paidAmount,
+        r.orderTotal, r.commissionAmount, r.paidAmount,
         r.outstandingAmount, this.t(`commissions.payout.${r.payoutStatus}`), r.paidAt?.slice(0, 10) ?? '', r.paymentNote
       ].map(cell).join(','));
     }

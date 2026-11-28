@@ -12,7 +12,8 @@ export interface Field {
   readonly?: boolean;      // shown in the list, not editable in the form
   hideInList?: boolean;
   showInDetail?: boolean;
-  showInForm?: boolean;
+  showInForm?: boolean | ((row: any, isNew: boolean) => boolean);
+  ownerOnly?: boolean;
   defaultValue?: any;
   displayKey?: string;     // alternate API property used for display, such as customerName
   options?: Option[];      // fixed choices for a select
