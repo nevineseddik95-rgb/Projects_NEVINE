@@ -5,5 +5,7 @@ export const environment = {
   // Set to true to bring back the login requirement for /admin pages.
   requireLogin: true,
   apiUrl: '/api',
-  filesUrl: '',hubUrl: '/hubs/admin'
+  filesUrl: '',
+  siteUrl: 'http://localhost:4200',
+  hubUrl: '/hubs/admin'
 };

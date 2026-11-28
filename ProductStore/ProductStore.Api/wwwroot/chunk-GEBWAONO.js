@@ -1,1 +1,0 @@
-import{C as e}from"./chunk-LRWEADJV.js";var i=class t{transform(r){if(r==null||r==="")return"";let n=Number(r);return isNaN(n)?"":new Intl.NumberFormat("fr-FR",{maximumFractionDigits:0}).format(n)+" KMF"}static \u0275fac=function(n){return new(n||t)};static \u0275pipe=e({name:"kmf",type:t,pure:!0,standalone:!0})};export{i as a};

@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/ProductStore/">
     <Project Path="ProductStore/ProductStore.Api/productStore.Api.csproj" />
+    <Project Path="ProductStore/ProductStore.IntegrationTests/ProductStore.IntegrationTests.csproj" />
   </Folder>
 </Solution>

@@ -1,12 +1,35 @@
 <header class="page-head">
   <div>
-    <h1>{{ cfg.title }}</h1>
-    <p class="muted">{{ filtered.length }} of {{ rows.length }} shown</p>
+    <h1>{{ title }}</h1>
+    <p class="muted">{{ t('common.shown', { shown: filtered.length, total: rows.length }) }}</p>
   </div>
   <div class="head-actions">
-    <input class="search" type="search" name="search" [placeholder]="'Search ' + cfg.title.toLowerCase()" [(ngModel)]="search">
-    @if (canEdit) {
-      <button class="btn btn-primary" type="button" (click)="openNew()">Add {{ cfg.singular }}</button>
+    <input class="search" type="search" name="search" [placeholder]="t('common.searchPlaceholder', { item: title.toLowerCase() })" [(ngModel)]="search">
+    <button class="btn btn-ghost" type="button" (click)="load()">{{ 'common.refresh' | translate }}</button>
+    <button class="btn btn-ghost" type="button" (click)="exportCsv()" [disabled]="!filtered.length">{{ 'common.exportCsv' | translate }}</button>
+    <div class="view-switch" role="group" [attr.aria-label]="'common.adminLayout' | translate">
+      <button type="button" [class.on]="viewMode === 'table'" [attr.aria-pressed]="viewMode === 'table'"
+              [attr.aria-label]="'common.tableView' | translate" (click)="setView('table')">▦</button>
+      <button type="button" [class.on]="viewMode === 'cards'" [attr.aria-pressed]="viewMode === 'cards'"
+              [attr.aria-label]="'common.cardView' | translate" (click)="setView('cards')">▤</button>
+    </div>
+    <div class="view-switch density-switch" role="group" [attr.aria-label]="'common.rowDensity' | translate">
+      <button type="button" [class.on]="density === 'comfortable'" [attr.aria-pressed]="density === 'comfortable'"
+              (click)="setDensity('comfortable')">{{ 'common.comfortable' | translate }}</button>
+      <button type="button" [class.on]="density === 'compact'" [attr.aria-pressed]="density === 'compact'"
+              (click)="setDensity('compact')">{{ 'common.compact' | translate }}</button>
+    </div>
+    <details class="column-picker">
+      <summary class="btn btn-ghost">{{ 'common.columns' | translate }}</summary>
+      <div class="column-menu">
+        @for (f of listFields; track f.key) {
+          <label class="check"><input type="checkbox" [checked]="visibleKeys.includes(f.key)" (change)="toggleColumn(f.key)"> {{ t(f.label) }}</label>
+        }
+        <button class="btn btn-ghost" type="button" (click)="resetColumns()">{{ 'common.resetColumns' | translate }}</button>
+      </div>
+    </details>
+    @if (canCreate) {
+      <button class="btn btn-primary" type="button" (click)="openNew()">{{ t('common.addItem', { item: singular }) }}</button>
     }
   </div>
 </header>
@@ -14,139 +37,229 @@
 @if (error && !editing) { <p class="alert" role="alert">{{ error }}</p> }
 
 @if (cfg.endpoint === 'commands') {
-  <p class="workflow-hint">
-    Workflow: Pending → Processing → Shipped → Delivered. Confirm the deposit before processing or shipping;
-    delivery requires payment in full. Delivered and cancelled orders cannot be reopened.
-  </p>
+  <p class="workflow-hint">{{ 'admin.workflowHint' | translate }}</p>
 }
 
-<section class="filters" aria-label="Filters">
+<button class="btn btn-ghost admin-filter-toggle" type="button"
+        [attr.aria-expanded]="filtersOpen" aria-controls="admin-filters" (click)="filtersOpen = !filtersOpen">
+  {{ (filtersOpen ? 'common.hideFilters' : 'common.showFilters') | translate }}
+</button>
+<section id="admin-filters" class="filters" [class.mobile-open]="filtersOpen" [attr.aria-label]="'common.filters' | translate">
   @for (f of filterFields; track f.key) {
     <div class="filter">
       @if (f.type === 'select') {
-        <label [attr.for]="'flt_' + f.key">{{ f.label }}</label>
+        <label [attr.for]="'flt_' + f.key">{{ t(f.label) }}</label>
         <select [id]="'flt_' + f.key" [name]="'sel_' + f.key" [(ngModel)]="sel[f.key]">
-          <option [ngValue]="null">All</option>
+          <option [ngValue]="null">{{ 'common.all' | translate }}</option>
           @for (o of options(f); track o.value) { <option [ngValue]="o.value">{{ o.label }}</option> }
         </select>
       } @else if (f.type === 'date' || f.type === 'datetime') {
-        <span>{{ f.label }}</span>
+        <span>{{ t(f.label) }}</span>
         <div class="pair">
-          <input type="date" [name]="'from_' + f.key" [attr.aria-label]="f.label + ' from'" [(ngModel)]="from[f.key]">
-          <span>to</span>
-          <input type="date" [name]="'to_' + f.key" [attr.aria-label]="f.label + ' to'" [(ngModel)]="to[f.key]">
+          <input type="date" [name]="'from_' + f.key" [attr.aria-label]="t(f.label) + ' ' + ('common.from' | translate)" [(ngModel)]="from[f.key]">
+          <span>{{ 'common.to' | translate }}</span>
+          <input type="date" [name]="'to_' + f.key" [attr.aria-label]="t(f.label) + ' ' + ('common.to' | translate)" [(ngModel)]="to[f.key]">
         </div>
       } @else {
-        <span>{{ f.label }}</span>
+        <span>{{ t(f.label) }}</span>
         <div class="pair">
-          <input class="num" type="number" min="0" placeholder="Min" [name]="'min_' + f.key" [attr.aria-label]="f.label + ' minimum'" [(ngModel)]="min[f.key]">
-          <span>to</span>
-          <input class="num" type="number" min="0" placeholder="Max" [name]="'max_' + f.key" [attr.aria-label]="f.label + ' maximum'" [(ngModel)]="max[f.key]">
+          <input class="num" type="number" min="0" [placeholder]="'common.min' | translate" [name]="'min_' + f.key" [attr.aria-label]="t(f.label) + ' ' + ('common.min' | translate)" [(ngModel)]="min[f.key]">
+          <span>{{ 'common.to' | translate }}</span>
+          <input class="num" type="number" min="0" [placeholder]="'common.max' | translate" [name]="'max_' + f.key" [attr.aria-label]="t(f.label) + ' ' + ('common.max' | translate)" [(ngModel)]="max[f.key]">
         </div>
       }
     </div>
   }
   @for (c of cfg.quickChecks ?? []; track $index) {
-    <label class="check"><input type="checkbox" [name]="'chk_' + $index" [(ngModel)]="checks[$index]"> {{ c.label }}</label>
+    <label class="check"><input type="checkbox" [name]="'chk_' + $index" [(ngModel)]="checks[$index]"> {{ t(c.label) }}</label>
   }
-  @if (hasFilters) { <button class="btn btn-ghost" type="button" (click)="clearFilters()">Clear filters</button> }
+  @if (hasFilters) { <button class="btn btn-ghost" type="button" (click)="clearFilters()">{{ 'common.clearFilters' | translate }}</button> }
 </section>
 
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr>
-        @for (f of listFields; track f.key) {
-          <th [class.num]="f.type === 'money'"
-              [attr.aria-sort]="sortKey === f.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : null">
-            @if (f.type === 'image') { {{ f.label }} } @else {
-              <button class="sort" type="button" (click)="sortBy(f)">{{ f.label }} @if (sortKey === f.key) { <span aria-hidden="true">{{ sortDir === 'asc' ? '▲' : '▼' }}</span> }</button>
-            }
-          </th>
-        }
-        <th class="actions-col"><span class="sr-only">Actions</span></th>
-      </tr>
-    </thead>
-    <tbody>
-      @for (r of filtered; track r.id) {
+@if (viewMode === 'table') {
+  <div class="table-wrap" [class.compact]="density === 'compact'">
+    <table>
+      <thead>
         <tr>
-          @for (f of listFields; track f.key) {
-            <td [class.num]="f.type === 'money'"
-                [class.nowrap]="f.type === 'date' || f.type === 'datetime' || f.key === 'referenceNumber' || f.key === 'productId' || f.key === 'model'"
-                [class.ref]="f.key === 'referenceNumber'">
-              @switch (f.type) {
-                @case ('image') { <img class="thumb" [src]="img(r[f.key])" alt="" appImageFallback> }
-                @case ('color') { <span class="swatch" [style.background]="r[f.key]"></span> {{ r[f.key] }} }
-                @case ('money') { {{ r[f.key] | kmf }} }
-                @case ('date') { {{ r[f.key] | date: 'mediumDate' }} }
-                @case ('datetime') { {{ r[f.key] ? (r[f.key] | date: 'medium') : 'Never visited' }} }
-                @default {
-                  @if (f.key === 'status' || f.key === 'paymentStatus') {
-                    <span class="badge" [class]="'badge s-' + ('' + r[f.key]).split(' ')[0]">{{ r[f.key] }}</span>
-                  } @else { {{ label(r, f) }} }
+          @for (f of visibleListFields; track f.key) {
+            <th [class.num]="f.type === 'money'"
+                [attr.aria-sort]="sortKey === f.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : null">
+              @if (f.type === 'image') { {{ t(f.label) }} } @else {
+                <button class="sort" type="button" (click)="sortBy(f)">{{ t(f.label) }} @if (sortKey === f.key) { <span aria-hidden="true">{{ sortDir === 'asc' ? '▲' : '▼' }}</span> }</button>
+              }
+            </th>
+          }
+          <th class="actions-col" [attr.aria-label]="'common.actions' | translate"></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (r of filtered; track r.id) {
+          <tr>
+            @for (f of visibleListFields; track f.key) {
+              <td [class.num]="f.type === 'money'"
+                  [class.nowrap]="f.type === 'date' || f.type === 'datetime' || f.key === 'referenceNumber' || f.key === 'productId' || f.key === 'model'"
+                  [class.ref]="f.key === 'referenceNumber'">
+                @switch (f.type) {
+                  @case ('image') { <img class="thumb" [src]="img(r[f.key])" alt="" appImageFallback> }
+                  @case ('color') { <span class="swatch" [style.background]="r[f.key]"></span> {{ r[f.key] }} }
+                  @case ('money') { {{ r[f.key] | kmf }} }
+                  @case ('date') { {{ r[f.key] | date: 'mediumDate' : locale }} }
+                  @case ('datetime') { {{ r[f.key] ? (r[f.key] | date: 'medium' : locale) : ('common.never' | translate) }} }
+                  @default { {{ label(r, f) }} }
                 }
+              </td>
+            }
+            <td class="row-actions">
+              @for (a of cfg.rowActions ?? []; track $index) {
+                @if (!a.show || a.show(r)) {
+                  @if (a.href) {
+                    @if (a.href(r); as href) {
+                      <button class="btn btn-ghost" type="button" (click)="openLink(href)"
+                              [title]="'admin.smsHint' | translate">{{ t(a.label) }}</button>
+                    }
+                  } @else if (canEdit) {
+                    <button class="btn btn-primary" type="button" (click)="runAction(a, r)"
+                            [disabled]="actionBusy === r.id + ':' + a.path">
+                      {{ actionBusy === r.id + ':' + a.path ? ('common.working' | translate) : t(a.label) }}
+                    </button>
+                  }
+                }
+              }
+              <button class="btn btn-ghost" type="button" (click)="openView(r)">{{ 'common.view' | translate }}</button>
+              @if (canEditRow(r)) {
+                <button class="btn btn-ghost" type="button" (click)="openEdit(r)">{{ editLabel }}</button>
+              }
+              @if (canDeleteRow(r)) {
+                <button class="btn btn-danger" type="button" (click)="remove(r)">{{ 'common.delete' | translate }}</button>
               }
             </td>
-          }
-          <td class="row-actions">
-            @for (a of cfg.rowActions ?? []; track $index) {
-              @if (!a.show || a.show(r)) {
-                @if (a.href) {
-                  @if (a.href(r); as href) {
-                    <button class="btn btn-ghost" type="button" (click)="openLink(href)"
-                            title="Opens your SMS app with the order details ready to send.">{{ a.label }}</button>
+          </tr>
+        } @empty {
+          <tr><td class="empty" [attr.colspan]="visibleListFields.length + 1">
+            @if (rows.length) { {{ t('common.noMatch', { item: title.toLowerCase() }) }} }
+            @else if (canCreate) { {{ t('common.addFirst', { item: singular }) }} }
+            @else { {{ 'common.noData' | translate }} }
+          </td></tr>
+        }
+      </tbody>
+    </table>
+  </div>
+} @else {
+  <div class="record-grid" [class.compact]="density === 'compact'">
+    @for (r of filtered; track r.id) {
+      <article class="record-card">
+        <div class="record-card-head">
+          <div>
+            <p class="muted">{{ singular }}</p>
+            <h3>{{ r.referenceNumber || r.username || r.model || r.name || r.fullName || r.id }}</h3>
+          </div>
+          @if (r.imageUrl) { <img class="thumb" [src]="img(r.imageUrl)" alt="" appImageFallback> }
+        </div>
+        <dl class="record-fields">
+          @for (f of visibleListFields; track f.key) {
+            @if (f.type !== 'image') {
+              <div>
+                <dt>{{ t(f.label) }}</dt>
+                <dd>
+                  @switch (f.type) {
+                    @case ('money') { {{ r[f.key] | kmf }} }
+                    @case ('date') { {{ r[f.key] | date: 'mediumDate' : locale }} }
+                    @case ('datetime') { {{ r[f.key] ? (r[f.key] | date: 'medium' : locale) : '—' }} }
+                    @default { {{ label(r, f) || '—' }} }
                   }
-                } @else if (canEdit) {
-                  <button class="btn btn-primary" type="button" (click)="runAction(a, r)"
-                          [disabled]="actionBusy === r.id + ':' + a.path">
-                    {{ actionBusy === r.id + ':' + a.path ? 'Working…' : a.label }}
-                  </button>
+                </dd>
+              </div>
+            }
+          }
+        </dl>
+        <div class="record-actions">
+          @for (a of cfg.rowActions ?? []; track $index) {
+            @if (!a.show || a.show(r)) {
+              @if (a.href) {
+                @if (a.href(r); as href) {
+                  <button class="btn btn-ghost" type="button" (click)="openLink(href)">{{ t(a.label) }}</button>
                 }
+              } @else if (canEdit) {
+                <button class="btn btn-primary" type="button" (click)="runAction(a, r)"
+                        [disabled]="actionBusy === r.id + ':' + a.path">
+                  {{ actionBusy === r.id + ':' + a.path ? ('common.working' | translate) : t(a.label) }}
+                </button>
               }
             }
-            <button class="btn btn-ghost" type="button" (click)="openEdit(r)">{{ canEdit ? 'Edit' : 'View' }}</button>
-            @if (canEdit) {
-              <button class="btn btn-danger" type="button" (click)="remove(r)">Delete</button>
-            }
-          </td>
-        </tr>
-      } @empty {
-        <tr><td class="empty" [attr.colspan]="listFields.length + 1">
-          @if (rows.length) { No {{ cfg.title.toLowerCase() }} match these filters. Clear a filter to see more. }
-          @else { Nothing here yet. Use “Add {{ cfg.singular }}” to create the first one. }
-        </td></tr>
-      }
-    </tbody>
-  </table>
-</div>
+          }
+          <button class="btn btn-ghost" type="button" (click)="openView(r)">{{ 'common.view' | translate }}</button>
+          @if (canEditRow(r)) { <button class="btn btn-ghost" type="button" (click)="openEdit(r)">{{ editLabel }}</button> }
+          @if (canDeleteRow(r)) { <button class="btn btn-danger" type="button" (click)="remove(r)">{{ 'common.delete' | translate }}</button> }
+        </div>
+      </article>
+    } @empty {
+      <div class="state-card">
+        <h3>{{ t('common.noFound', { item: title.toLowerCase() }) }}</h3>
+        <p class="muted">{{ 'common.tryClearing' | translate }}</p>
+      </div>
+    }
+  </div>
+}
 
 @if (editing) {
   <div class="backdrop" (click)="close()"></div>
   <aside class="panel" role="dialog" aria-modal="true"
-         [attr.aria-label]="(viewOnly ? 'View ' : (isNew ? 'Add ' : 'Edit ')) + cfg.singular">
-    <h2>{{ viewOnly ? 'View' : (isNew ? 'Add' : 'Edit') }} {{ cfg.singular }}</h2>
+         [attr.aria-label]="viewOnly ? t('common.viewItem', { item: singular }) : (isNew ? t('common.addDialog', { item: singular }) : t('common.editDialog', { item: singular, action: editLabel }))">
+    <header class="panel-head">
+      <h2>{{ viewOnly ? ('common.view' | translate) : (isNew ? ('common.add' | translate) : editLabel) }} {{ singular }}</h2>
+      <button class="btn btn-ghost" type="button" [attr.aria-label]="'common.closePanel' | translate" (click)="close()">×</button>
+    </header>
 
-    <form #form="ngForm" (ngSubmit)="save()">
-      <fieldset class="plain" [disabled]="viewOnly">
+    @if (cfg.endpoint === 'commands') {
+      <div class="customer-summary">
+        <span>{{ 'common.customer' | translate }}</span>
+        <strong>{{ customerName(editing) }}</strong>
+        @if (editing.customerEmail) { <small>{{ editing.customerEmail }}</small> }
+        @if (editing.customerPhone) { <small>{{ editing.customerPhone }}</small> }
+      </div>
+    }
+
+    @if (viewOnly) {
+      <dl class="detail-list">
+        @for (f of detailFields; track f.key) {
+          <div>
+            <dt>{{ t(f.label) }}</dt>
+            <dd>
+              @switch (f.type) {
+                @case ('image') {
+                  @if (editing[f.key]) { <img class="preview" [src]="img(editing[f.key])" [alt]="'common.preview' | translate" appImageFallback> }
+                }
+                @case ('money') { {{ editing[f.key] | kmf }} }
+                @case ('date') { {{ editing[f.key] | date: 'mediumDate' : locale }} }
+                @case ('datetime') { {{ editing[f.key] ? (editing[f.key] | date: 'medium' : locale) : '—' }} }
+                @default { {{ label(editing, f) || '—' }} }
+              }
+            </dd>
+          </div>
+        }
+      </dl>
+      <div class="panel-actions"><button class="btn btn-primary" type="button" (click)="close()">{{ 'common.close' | translate }}</button></div>
+    } @else {
+      <form #form="ngForm" (ngSubmit)="save()">
         @for (f of formFields; track f.key) {
           <div class="field">
-            <label [attr.for]="f.key">{{ f.label }}</label>
+            <label [attr.for]="f.key">{{ t(f.label) }}</label>
 
             @if (f.type === 'textarea') {
               <textarea [id]="f.key" [name]="f.key" rows="4" [(ngModel)]="editing[f.key]" [required]="!!f.required"></textarea>
             } @else if (f.type === 'select') {
               <select [id]="f.key" [name]="f.key" [(ngModel)]="editing[f.key]" [required]="!!f.required">
-                <option [ngValue]="null">Choose…</option>
+                <option [ngValue]="null">{{ 'common.choose' | translate }}</option>
                 @for (o of options(f); track o.value) { <option [ngValue]="o.value">{{ o.label }}</option> }
               </select>
             } @else if (f.type === 'image') {
               <div class="image-field">
-                <img class="preview" [src]="img(editing[f.key])" alt="Preview" appImageFallback>
+                <img class="preview" [src]="img(editing[f.key])" [alt]="'common.preview' | translate" appImageFallback>
                 <div>
                   <input [id]="f.key" type="file" accept="image/jpeg,image/png,image/webp" (change)="onFile($event, f)">
-                  @if (uploading) { <p class="muted">Uploading…</p> }
-                  @if (editing[f.key] && !uploading && !viewOnly) {
-                    <button class="btn btn-ghost" type="button" (click)="editing[f.key] = null">Remove image</button>
+                  @if (uploading) { <p class="muted">{{ 'common.uploading' | translate }}</p> }
+                  @if (editing[f.key] && !uploading) {
+                    <button class="btn btn-ghost" type="button" (click)="editing[f.key] = null">{{ 'common.removeImage' | translate }}</button>
                   }
                 </div>
               </div>
@@ -165,18 +278,24 @@
             }
           </div>
         }
-      </fieldset>
 
-      @if (error) { <p class="alert" role="alert">{{ error }}</p> }
-
-      <div class="panel-actions">
-        <button class="btn btn-ghost" type="button" (click)="close()">{{ viewOnly ? 'Close' : 'Cancel' }}</button>
-        @if (!viewOnly) {
-          <button class="btn btn-primary" type="submit" [disabled]="form.invalid || saving || uploading">
-            {{ saving ? 'Saving…' : 'Save ' + cfg.singular }}
-          </button>
+        @if (readonlyFields.length) {
+          <div class="readonly-fields">
+            @for (f of readonlyFields; track f.key) {
+              <div class="detail-row"><span>{{ t(f.label) }}</span><strong>{{ label(editing, f) || '—' }}</strong></div>
+            }
+          </div>
         }
-      </div>
-    </form>
+
+        @if (error) { <p class="alert" role="alert">{{ error }}</p> }
+
+        <div class="panel-actions">
+          <button class="btn btn-ghost" type="button" (click)="close()">{{ 'common.cancel' | translate }}</button>
+          <button class="btn btn-primary" type="submit" [disabled]="form.invalid || saving || uploading">
+            {{ saving ? ('common.saving' | translate) : t('common.saveItem', { item: singular }) }}
+          </button>
+        </div>
+      </form>
+    }
   </aside>
 }

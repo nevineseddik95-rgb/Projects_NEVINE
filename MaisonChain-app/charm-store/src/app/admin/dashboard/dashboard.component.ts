@@ -1,39 +1,41 @@
-import { DestroyRef } from '@angular/core';
+import { DestroyRef, Component, OnInit, inject } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { debounceTime } from 'rxjs';
-import { RealtimeService } from '../../core/realtime.service';
-import { Component, OnInit, inject } from '@angular/core';
-import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
-import { KmfPipe } from '../../core/kmf.pipe';
 import { ImageFallbackDirective } from '../../core/image-fallback.directive';
+import { KmfPipe } from '../../core/kmf.pipe';
+import { LanguageService } from '../../core/language.service';
 import { ORDER_STATUSES } from '../../core/models';
+import { RealtimeService } from '../../core/realtime.service';
+import { TranslatePipe } from '../../core/translate.pipe';
+import { TranslationParams } from '../../core/translations';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [KmfPipe, DatePipe, RouterLink, ImageFallbackDirective],
+  imports: [KmfPipe, DatePipe, RouterLink, ImageFallbackDirective, TranslatePipe],
   template: `
-    <header class="page-head"><div><h1>Dashboard</h1><p class="muted">Orders, payments and customers at a glance</p></div></header>
+    <header class="page-head"><div><h1>{{ 'admin.dashboard' | translate }}</h1><p class="muted">{{ 'dashboard.subtitle' | translate }}</p></div></header>
     @if (errors.length) {
-      <p class="alert" role="alert">These lists could not be loaded: {{ errors.join(', ') }}. Check that the API is running and you are signed in.</p>
+      <p class="alert" role="alert">{{ t('dashboard.loadFailed', { errors: errors.join(', ') }) }}</p>
     }
 
     <div class="stats">
-      <div class="stat stat-main"><span class="stat-num">{{ revenue | kmf }}</span><span>Revenue from orders that are not cancelled</span></div>
-      <div class="stat"><span class="stat-num">{{ commands.length }}</span><span>Orders in total</span></div>
-      <div class="stat"><span class="stat-num">{{ paymentCount('Payment submitted') }}</span><span>Payments to check</span></div>
-      <div class="stat"><span class="stat-num">{{ products.length }}</span><span>Products</span></div>
-      <div class="stat"><span class="stat-num">{{ customers.length }}</span><span>Customers</span></div>
+      <div class="stat stat-main"><span class="stat-num">{{ revenue | kmf }}</span><span>{{ 'dashboard.revenue' | translate }}</span></div>
+      <div class="stat"><span class="stat-num">{{ commands.length }}</span><span>{{ 'dashboard.ordersTotal' | translate }}</span></div>
+      <div class="stat"><span class="stat-num">{{ paymentCount('Payment submitted') }}</span><span>{{ 'dashboard.paymentsToCheck' | translate }}</span></div>
+      <div class="stat"><span class="stat-num">{{ products.length }}</span><span>{{ 'dashboard.products' | translate }}</span></div>
+      <div class="stat"><span class="stat-num">{{ customers.length }}</span><span>{{ 'dashboard.customers' | translate }}</span></div>
     </div>
 
     <div class="dash-grid">
       <section class="card">
-        <h2>Orders by status</h2>
+        <h2>{{ 'dashboard.ordersByStatus' | translate }}</h2>
         @for (s of statuses; track s) {
           <div class="bar-row">
-            <span>{{ s }}</span>
+            <span>{{ t('status.' + s) }}</span>
             <div class="bar"><i [style.width.%]="commands.length ? count(s) / commands.length * 100 : 0"></i></div>
             <span class="bar-n">{{ count(s) }}</span>
           </div>
@@ -41,18 +43,22 @@ import { ORDER_STATUSES } from '../../core/models';
       </section>
 
       <section class="card">
-        <h2>Recent visitors</h2>
+        <h2>{{ 'dashboard.recentVisitors' | translate }}</h2>
         @for (c of recentVisitors; track c.id) {
-          <p class="line"><span>{{ c.fullName }}</span><span class="muted">{{ c.lastVisit | date: 'medium' }}</span></p>
-        } @empty { <p class="muted">No customer visits recorded yet.</p> }
+          <p class="line"><span>{{ c.fullName }}</span><span class="muted">{{ c.lastVisit | date: 'medium' : locale }}</span></p>
+        } @empty { <p class="muted">{{ 'dashboard.noVisits' | translate }}</p> }
       </section>
     </div>
 
     <section class="card">
-      <div class="card-head"><h2>Latest orders</h2><a routerLink="/admin/orders">See all orders</a></div>
+      <div class="card-head"><h2>{{ 'dashboard.latestOrders' | translate }}</h2><a routerLink="/admin/orders">{{ 'dashboard.seeAllOrders' | translate }}</a></div>
       <div class="table-wrap flat">
         <table>
-          <thead><tr><th>Image</th><th>Reference</th><th>Customer</th><th>Items</th><th>Date</th><th>Status</th><th>Payment</th><th>Total</th></tr></thead>
+          <thead><tr>
+            <th>{{ 'common.image' | translate }}</th><th>{{ 'common.reference' | translate }}</th><th>{{ 'common.customer' | translate }}</th>
+            <th>{{ 'common.items' | translate }}</th><th>{{ 'common.date' | translate }}</th><th>{{ 'common.status' | translate }}</th>
+            <th>{{ 'common.payment' | translate }}</th><th>{{ 'common.total' | translate }}</th>
+          </tr></thead>
           <tbody>
             @for (o of latest; track o.id) {
               <tr>
@@ -60,12 +66,12 @@ import { ORDER_STATUSES } from '../../core/models';
                 <td>{{ o.referenceNumber }}</td>
                 <td>{{ customerName(o.customerId) }}</td>
                 <td>{{ o.model }}</td>
-                <td>{{ o.date | date: 'mediumDate' }}</td>
-                <td><span class="badge" [class]="'badge s-' + o.status">{{ o.status }}</span></td>
-                <td><span class="badge" [class]="'badge s-' + ('' + o.paymentStatus).split(' ')[0]">{{ o.paymentStatus }}</span></td>
+                <td>{{ o.date | date: 'mediumDate' : locale }}</td>
+                <td><span class="badge" [class]="'badge s-' + o.status">{{ t('status.' + o.status) }}</span></td>
+                <td><span class="badge" [class]="'badge s-' + ('' + o.paymentStatus).split(' ')[0]">{{ t('payment.' + o.paymentStatus) }}</span></td>
                 <td>{{ o.total | kmf }}</td>
               </tr>
-            } @empty { <tr><td class="empty" colspan="8">No orders yet.</td></tr> }
+            } @empty { <tr><td class="empty" colspan="8">{{ 'dashboard.noOrders' | translate }}</td></tr> }
           </tbody>
         </table>
       </div>
@@ -74,26 +80,30 @@ import { ORDER_STATUSES } from '../../core/models';
 })
 export class DashboardComponent implements OnInit {
   api = inject(ApiService);
+  language = inject(LanguageService);
   statuses = ORDER_STATUSES;
   commands: any[] = [];
   products: any[] = [];
   customers: any[] = [];
   errors: string[] = [];
 
- private realtime = inject(RealtimeService);
-private destroyRef = inject(DestroyRef);
+  private realtime = inject(RealtimeService);
+  private destroyRef = inject(DestroyRef);
 
-ngOnInit(): void {
-  this.reload();
-  this.realtime.changes$.pipe(debounceTime(250), takeUntilDestroyed(this.destroyRef)).subscribe(() => this.reload());
-}
+  get locale(): string { return this.language.locale(); }
+  t(key: string, params: TranslationParams = {}): string { return this.language.t(key, params); }
 
-private reload(): void {
-  this.errors = [];
-  this.load('commands', d => (this.commands = d));
-  this.load('products', d => (this.products = d));
-  this.load('customers', d => (this.customers = d));
-}
+  ngOnInit(): void {
+    this.reload();
+    this.realtime.changes$.pipe(debounceTime(250), takeUntilDestroyed(this.destroyRef)).subscribe(() => this.reload());
+  }
+
+  private reload(): void {
+    this.errors = [];
+    this.load('commands', d => (this.commands = d));
+    this.load('products', d => (this.products = d));
+    this.load('customers', d => (this.customers = d));
+  }
 
   private load(endpoint: string, set: (d: any[]) => void): void {
     this.api.list(endpoint).subscribe({
@@ -114,5 +124,5 @@ private reload(): void {
     return this.customers.filter(c => c.lastVisit)
       .sort((a, b) => String(b.lastVisit).localeCompare(String(a.lastVisit))).slice(0, 6);
   }
-  customerName(id: string) { return this.customers.find(c => c.id === id)?.fullName ?? 'Unknown'; }
+  customerName(id: string) { return this.customers.find(c => c.id === id)?.fullName ?? this.t('dashboard.unknownCustomer'); }
 }

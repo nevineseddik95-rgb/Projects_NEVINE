@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /cart
+Disallow: /checkout
+Disallow: /favorites
+
+Sitemap: https://beautyandshine.up.railway.app/sitemap.xml

@@ -198,8 +198,26 @@ namespace productStore.Api.Data.migrations
                     b.Property<Guid>("ColorId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("CommissionAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("CommissionPaidAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime?>("CommissionPaidAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CommissionPaymentNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByAdminId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uuid");
@@ -273,12 +291,18 @@ namespace productStore.Api.Data.migrations
 
                     b.HasIndex("CreatedAt");
 
+                    b.HasIndex("CreatedByAdminId");
+
                     b.HasIndex("PaymentReference")
                         .IsUnique()
                         .HasFilter("\"PaymentReference\" IS NOT NULL AND \"PaymentReference\" <> ''");
 
                     b.HasIndex("ReferenceNumber")
                         .IsUnique();
+
+                    b.HasIndex("TrackingNumber")
+                        .IsUnique()
+                        .HasFilter("\"TrackingNumber\" IS NOT NULL AND \"TrackingNumber\" <> ''");
 
                     b.ToTable("Commands");
                 });
@@ -339,6 +363,14 @@ namespace productStore.Api.Data.migrations
                     b.Navigation("Size");
 
                     b.Navigation("genre");
+                });
+
+            modelBuilder.Entity("productStore.Api.Models.Command", b =>
+                {
+                    b.HasOne("ProductStore.Api.Models.AdminUser", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 #pragma warning restore 612, 618
         }

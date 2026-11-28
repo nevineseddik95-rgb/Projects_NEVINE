@@ -5,6 +5,10 @@ import { CartService } from '../core/cart.service';
 import { FavoritesService } from '../core/favorites.service';
 import { KmfPipe } from '../core/kmf.pipe';
 import { ImageFallbackDirective } from '../core/image-fallback.directive';
+import { LanguageService } from '../core/language.service';
+import { LanguageSwitcherComponent } from '../core/language-switcher.component';
+import { TranslatePipe } from '../core/translate.pipe';
+import { TranslationParams } from '../core/translations';
 
 interface Product {
   id: string;
@@ -19,57 +23,68 @@ interface Product {
 @Component({
   selector: 'app-favorites',
   standalone: true,
-  imports: [KmfPipe, RouterLink, ImageFallbackDirective],
+  imports: [KmfPipe, RouterLink, ImageFallbackDirective, LanguageSwitcherComponent, TranslatePipe],
   template: `
     <header class="shop-head">
       <a class="brand" routerLink="/">Beauty & Shine</a>
-      <nav class="shop-nav" aria-label="Shop">
-        <a class="nav-link" routerLink="/">All products</a>
-        <a class="nav-link" routerLink="/cart">Cart <span class="nav-badge">{{ cart.count() }}</span></a>
+      <nav class="shop-nav" [attr.aria-label]="'shop.allProducts' | translate">
+        <a class="nav-link" routerLink="/">{{ 'shop.allProducts' | translate }}</a>
+        <a class="nav-link" routerLink="/cart">{{ 'shop.cart' | translate }} <span class="nav-badge">{{ cart.count() }}</span></a>
+        <app-language-switcher />
       </nav>
     </header>
 
     <main class="shop">
-      <h1>Your favorites</h1>
+      <h1>{{ 'favorites.title' | translate }}</h1>
 
-      @if (failed) { <p class="alert" role="alert">The products could not be loaded. Check that the API is running.</p> }
+      @if (failed) { <p class="alert" role="alert">{{ 'favorites.loadFailed' | translate }}</p> }
 
       @if (!loaded) {
-        <p class="muted">Loading…</p>
+        <p class="muted">{{ 'common.loading' | translate }}</p>
       } @else if (items.length === 0) {
-        <p class="muted">You have no favorites yet. Tap the heart on a product to save it here.</p>
-        <p><a class="btn btn-primary" routerLink="/">Browse products</a></p>
+        <p class="muted">{{ 'favorites.empty' | translate }}</p>
+        <p><a class="btn btn-primary" routerLink="/">{{ 'cart.browse' | translate }}</a></p>
       } @else {
         <div class="grid">
           @for (p of items; track p.id) {
             <article class="product">
-              <img [src]="api.img(p.imageUrl)" [alt]="p.model" loading="lazy" appImageFallback>
+              <a class="card-img" [routerLink]="['/product', p.id]" [attr.aria-label]="t('shop.viewProduct', { model: p.model })">
+                <img [src]="api.img(p.imageUrl)" [alt]="p.model" loading="lazy" appImageFallback>
+              </a>
               <button type="button" class="heart on" aria-pressed="true"
-                      [attr.aria-label]="'Remove ' + p.model + ' from favorites'" (click)="favs.toggle(p.id)">♥</button>
-              <h2>{{ p.model }}</h2>
-              <p class="muted">{{ p.genre }}, {{ p.color }}@if (p.size) {, size {{ p.size }} }</p>
-              <p class="price">{{ p.price | kmf }}</p>
-              <button class="btn btn-primary" type="button" (click)="add(p)">Add to cart</button>
-              <button class="btn btn-ghost" type="button" (click)="favs.toggle(p.id)">Remove</button>
+                      [attr.aria-label]="t('shop.removeFavorite', { model: p.model })" (click)="favs.toggle(p.id)">♥</button>
+              <div class="product-body">
+                <p class="product-kind">{{ p.genre }}</p>
+                <h2><a [routerLink]="['/product', p.id]">{{ p.model }}</a></h2>
+                <p class="muted">{{ p.color }}@if (p.size) { · {{ 'common.size' | translate }} {{ p.size }} }</p>
+                <p class="price">{{ p.price | kmf }}</p>
+                <div class="product-actions">
+                  <button class="btn btn-primary" type="button" (click)="add(p)">{{ 'shop.addToCart' | translate }}</button>
+                  <a class="btn btn-ghost" [routerLink]="['/product', p.id]">{{ 'shop.details' | translate }}</a>
+                </div>
+              </div>
             </article>
           }
         </div>
       }
     </main>
 
-    @if (toast) { <p class="toast" role="status">{{ toast }} <a routerLink="/cart">View cart</a></p> }
+    @if (toast) { <p class="toast" role="status">{{ toast }} <a routerLink="/cart">{{ 'shop.viewCart' | translate }}</a></p> }
   `
 })
 export class FavoritesComponent implements OnInit {
   api = inject(ApiService);
   cart = inject(CartService);
   favs = inject(FavoritesService);
+  language = inject(LanguageService);
 
   products: Product[] = [];
   loaded = false;
   failed = false;
   toast = '';
   private timer: any;
+
+  t(key: string, params: TranslationParams = {}): string { return this.language.t(key, params); }
 
   ngOnInit(): void {
     this.api.list('products').subscribe({
@@ -83,21 +98,20 @@ export class FavoritesComponent implements OnInit {
           price: Number(r.Price ?? r.price ?? 0),
           imageUrl: r.ImageUrl ?? r.imageUrl ?? ''
         }));
-        this.favs.retain(this.products.map(p => p.id));   // forget products that no longer exist
+        this.favs.retain(this.products.map(p => p.id));
         this.loaded = true;
       },
       error: () => { this.failed = true; this.loaded = true; }
     });
   }
 
-  /** only the products you marked, so removing one makes it disappear at once */
   get items(): Product[] {
     return this.products.filter(p => this.favs.has(p.id));
   }
 
   add(p: Product): void {
     this.cart.add({ productId: p.id, model: p.model, price: p.price, imageUrl: p.imageUrl });
-    this.toast = `${p.model} added to the cart.`;
+    this.toast = this.t('shop.addedToCart', { model: p.model });
     clearTimeout(this.timer);
     this.timer = setTimeout(() => (this.toast = ''), 3500);
   }

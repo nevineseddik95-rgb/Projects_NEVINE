@@ -91,11 +91,7 @@ builder.AddProductStoreDb();
 
 var app = builder.Build();
 
-var emailUser = builder.Configuration["Email:Username"];
-var emailPassword = builder.Configuration["Email:Password"];
-var emailEnabled = !string.IsNullOrWhiteSpace(builder.Configuration["Email:Host"])
-    && !string.IsNullOrWhiteSpace(builder.Configuration["Email:FromAddress"] ?? emailUser)
-    && (string.IsNullOrWhiteSpace(emailUser) || !string.IsNullOrWhiteSpace(emailPassword));
+var emailEnabled = SmtpEmailSender.IsConfigured(builder.Configuration);
 app.Logger.LogInformation(
     "Email notifications are {State}.",
     emailEnabled ? "configured" : "not configured; set Email__Host, Email__FromAddress, Email__Username and Email__Password");
@@ -140,13 +136,14 @@ if (app.Environment.IsDevelopment()) app.UseHttpsRedirection();
 
 app.UsePathBase("/api");     // /api/products and /products reach the same endpoint
 app.UseRouting();            // must come right after UsePathBase
+app.UseSearchEngineHeaders();
 app.UseDefaultFiles();       // serves index.html at "/"
 app.UseStaticFiles();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Viewers can only look. Every change needs the owner, except the customer checkout, the login and the live connection.
+// Viewers can create orders but cannot change existing records. Customer checkout, login and the live connection stay open.
 var openWrites = new[] { "/auth/login", "/checkout", "/hubs" };
 app.Use(async (ctx, next) =>
 {
@@ -154,8 +151,11 @@ app.Use(async (ctx, next) =>
     var isWrite = HttpMethods.IsPost(method) || HttpMethods.IsPut(method) ||
                   HttpMethods.IsDelete(method) || HttpMethods.IsPatch(method);
     var path = ctx.Request.Path;
+    var viewerOrderCreate = HttpMethods.IsPost(method) &&
+        string.Equals(path.Value?.TrimEnd('/'), "/commands", StringComparison.OrdinalIgnoreCase) &&
+        ctx.User.IsInRole("Viewer");
 
-    if (isWrite && !openWrites.Any(p => path.StartsWithSegments(p)))
+    if (isWrite && !viewerOrderCreate && !openWrites.Any(p => path.StartsWithSegments(p)))
     {
         if (ctx.User.Identity?.IsAuthenticated != true) { ctx.Response.StatusCode = 401; return; }
         if (!ctx.User.IsInRole("Owner")) { ctx.Response.StatusCode = 403; return; }
@@ -169,7 +169,8 @@ app.Use(async (ctx, next) =>
         var first = (path.Value ?? "").Trim('/').Split('/')[0].ToLowerInvariant();
         string[] changed = first switch
         {
-            "checkout" => new[] { "commands", "customers" },
+            "checkout" => new[] { "commands", "customers", "commissions" },
+            "commands" => new[] { "commands", "commissions" },
             "" or "auth" or "hubs" or "upload" => Array.Empty<string>(),
             _ => new[] { first }
         };
@@ -186,19 +187,11 @@ app.Use(async (ctx, next) =>
 app.MapHub<AdminHub>("/hubs/admin");
 app.MapGet("/status", () => Results.Ok(new { service = "ProductStore API", status = "running" }));
 app.MapGet("/notifications/options", (IConfiguration config) =>
-{
-    var emailUser = config["Email:Username"];
-    var emailPassword = config["Email:Password"];
-    var emailEnabled = !string.IsNullOrWhiteSpace(config["Email:Host"])
-        && !string.IsNullOrWhiteSpace(config["Email:FromAddress"] ?? emailUser)
-        && (string.IsNullOrWhiteSpace(emailUser) || !string.IsNullOrWhiteSpace(emailPassword));
-
-    return Results.Ok(new
+    Results.Ok(new
     {
         smsEnabled = SmsSettings.IsEnabled(config),
-        emailEnabled
-    });
-});
+        emailEnabled = SmtpEmailSender.IsConfigured(config)
+    }));
 
 app.MapAuthEndpoints();
 app.MapAdminsEndpoints();
@@ -209,6 +202,7 @@ app.MapSizesEndpPoints();
 app.MapCustomersEndpoints();
 app.MapCommandsEndpoints();
 app.MapCheckoutEndpoints();
+app.MapSeoEndpoints();
 
 app.MapPost("/upload", async (
     IFormFile file,

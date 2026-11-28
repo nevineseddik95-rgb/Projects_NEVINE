@@ -41,7 +41,11 @@ public static class ProductsEndpoints
 
         group.MapGet("/{id}", async (Guid id, ProductStoreContext dbContext) =>
         {
-            var Product = await dbContext.Products.FindAsync(id);
+            var Product = await dbContext.Products
+                .Include(product => product.genre)
+                .Include(product => product.Color)
+                .Include(product => product.Size)
+                .FirstOrDefaultAsync(product => product.Id == id);
 
             return Product is not null ? Results.Ok(
                 new
@@ -52,7 +56,11 @@ public static class ProductsEndpoints
                     SizeId = Product.SizeId,
                     ColorId = Product.ColorId,
                     Price = Product.Price,
-                    ReleaseDate = Product.ReleaseDate,ImageUrl = Product.ImageUrl 
+                    ReleaseDate = Product.ReleaseDate,
+                    ImageUrl = Product.ImageUrl,
+                    Genre = Product.genre?.Name,
+                    Color = Product.Color?.Name,
+                    Size = Product.Size?.Name
                 })
                 : Results.NotFound();
         }).WithName(GetProductEndpointName);

@@ -2,29 +2,33 @@ import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
+import { LanguageService } from '../../core/language.service';
+import { LanguageSwitcherComponent } from '../../core/language-switcher.component';
+import { TranslatePipe } from '../../core/translate.pipe';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, LanguageSwitcherComponent, TranslatePipe],
   template: `
     <section class="login">
       <div class="login-art" aria-hidden="true">
         <p class="login-mark">Beauty & Shine</p>
-        <p class="login-line">Bracelets, necklaces ,keychains and MORE!, kept in order.</p>
+        <p class="login-line">{{ 'login.tagline' | translate }}</p>
       </div>
       <form class="login-card" #f="ngForm" (ngSubmit)="submit()">
-        <h1>Admin sign in</h1>
+        <app-language-switcher />
+        <h1>{{ 'login.title' | translate }}</h1>
         <div class="field">
-          <label for="username">Username</label>
+          <label for="username">{{ 'login.username' | translate }}</label>
           <input id="username" name="username" autocomplete="username" [(ngModel)]="username" required>
         </div>
         <div class="field">
-          <label for="password">Password</label>
+          <label for="password">{{ 'login.password' | translate }}</label>
           <input id="password" name="password" type="password" autocomplete="current-password" [(ngModel)]="password" required>
         </div>
         @if (error) { <p class="alert" role="alert">{{ error }}</p> }
-        <button class="btn btn-primary wide" type="submit" [disabled]="f.invalid || busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
+        <button class="btn btn-primary wide" type="submit" [disabled]="f.invalid || busy">{{ busy ? ('login.signingIn' | translate) : ('login.signIn' | translate) }}</button>
       </form>
     </section>
   `
@@ -32,6 +36,7 @@ import { AuthService } from '../../core/auth.service';
 export class LoginComponent {
   private auth = inject(AuthService);
   private router = inject(Router);
+  private language = inject(LanguageService);
   username = '';
   password = '';
   busy = false;
@@ -45,8 +50,8 @@ export class LoginComponent {
       error: e => {
         this.busy = false;
         this.error = e.status === 401 || e.status === 400
-          ? 'The username or password is not right. Try again.'
-          : 'The server could not be reached. Check that the API is running.';
+          ? this.language.t('login.invalid')
+          : this.language.t('login.serverError');
       }
     });
   }

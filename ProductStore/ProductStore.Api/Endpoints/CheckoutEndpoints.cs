@@ -5,7 +5,6 @@ using productStore.Api.Data;
 using productStore.Api.Models;
 using ProductStore.Api.Models;
 using ProductStore.Api.Services;
-using System.Net.Mail;
 
 namespace ProductStore.Api.Endpoints;
 
@@ -52,14 +51,13 @@ public static class CheckoutEndpoints
         {
             var name = (req.FullName ?? "").Trim();
             var phone = PhoneNumber.Normalize(req.Phone);
-            var emailAddress = (req.Email ?? "").Trim().ToLowerInvariant();
+            if (!EmailAddress.TryNormalize(req.Email, out var emailAddress))
+                return Results.BadRequest("That email address does not look right. You can leave it empty.");
 
             if (name.Length == 0 || string.IsNullOrWhiteSpace(req.DeliveryAddress))
                 return Results.BadRequest("Name and a delivery address are required.");
             if (phone is null)
                 return Results.BadRequest("Enter a valid phone number, for example +269 321 2345 or 321 2345.");
-            if (emailAddress.Length > 0 && !MailAddress.TryCreate(emailAddress, out _))
-                return Results.BadRequest("That email address does not look right. You can leave it empty.");
             if (!Methods.Contains(req.PaymentMethod))
                 return Results.BadRequest("Choose how you will pay the deposit.");
             if (req.Items.Count == 0 || req.Items.Count > MaxLines)
@@ -108,7 +106,7 @@ public static class CheckoutEndpoints
             }
             else
             {
-                if (emailAddress.Length > 0 && string.IsNullOrEmpty(customer.Email))
+                if (emailAddress.Length > 0 && !string.Equals(customer.Email, emailAddress, StringComparison.OrdinalIgnoreCase))
                     customer.Email = emailAddress;
                 customer.SmsUpdates = req.SmsUpdates;
                 await db.SaveChangesAsync(cancellationToken);
@@ -118,7 +116,7 @@ public static class CheckoutEndpoints
             var summary = string.Join(", ", lines.Select(l => l.Qty > 1 ? $"{l.Item.Model} x{l.Qty}" : l.Item.Model));
             var order = new Command
             {
-                ReferenceNumber = $"CMD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}",
+                ReferenceNumber = OrderTracking.NewReferenceNumber(),
                 CustomerId = customer.Id,
                 ProductId = first.Id,
                 Model = summary,
@@ -186,7 +184,8 @@ public static class CheckoutEndpoints
 
             var order = await db.Commands.FirstOrDefaultAsync(c => c.ReferenceNumber == reference, cancellationToken);
             var customer = order is null ? null : await db.Customers.FindAsync([order.CustomerId], cancellationToken);
-            var emailAddress = (notice.Email ?? "").Trim().ToLowerInvariant();
+            if (!EmailAddress.TryNormalize(notice.Email, out var emailAddress))
+                return Results.BadRequest("That email address does not look right.");
             var phone = PhoneNumber.Normalize(notice.Phone);
             var matches = customer is not null &&
                 ((emailAddress.Length > 0 && customer.Email.ToLower() == emailAddress) ||
@@ -238,8 +237,8 @@ public static class CheckoutEndpoints
     private static void NotifyAdmin(EmailNotificationQueue queue, IConfiguration config, string subject, string htmlBody)
     {
         var admin = config["Notifications:AdminEmail"];
-        if (!string.IsNullOrWhiteSpace(admin))
-            queue.TryEnqueue(new EmailNotification(admin, "Beauty & Shine admin", subject, htmlBody));
+        if (EmailAddress.TryNormalize(admin, out var adminEmail) && adminEmail.Length > 0)
+            queue.TryEnqueue(new EmailNotification(adminEmail, "Beauty & Shine admin", subject, htmlBody));
     }
 
     private static string BuildAdminNewOrderEmail(Command o, string name, string emailAddress, string? phone)

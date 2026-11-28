@@ -32,9 +32,20 @@ protected override void OnModelCreating(ModelBuilder b)
     {
         e.HasIndex(c => c.ReferenceNumber).IsUnique();
         e.HasIndex(c => c.CreatedAt);
+        e.HasIndex(c => c.CreatedByAdminId);
+        e.Property(c => c.CommissionAmount).HasPrecision(18, 2);
+        e.Property(c => c.CommissionPaidAmount).HasPrecision(18, 2);
+        e.Property(c => c.CommissionPaymentNote).HasMaxLength(1000);
+        e.HasOne<ProductStore.Api.Models.AdminUser>()
+            .WithMany()
+            .HasForeignKey(c => c.CreatedByAdminId)
+            .OnDelete(DeleteBehavior.Restrict);
         e.HasIndex(c => c.PaymentReference)
             .IsUnique()
             .HasFilter("\"PaymentReference\" IS NOT NULL AND \"PaymentReference\" <> ''");
+        e.HasIndex(c => c.TrackingNumber)
+            .IsUnique()
+            .HasFilter("\"TrackingNumber\" IS NOT NULL AND \"TrackingNumber\" <> ''");
     });
     b.Entity<StoredImage>(e =>
     {

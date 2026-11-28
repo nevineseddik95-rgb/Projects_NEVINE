@@ -37,6 +37,7 @@ public static class AdminsEndpoints
         {
             var user = await db.AdminUsers.FindAsync(id);
             if (user is null) return Results.NotFound();
+            if (user.Role == "Owner") return Results.BadRequest("The owner account cannot be edited.");
 
             if (!string.IsNullOrEmpty(dto.Password))
             {
@@ -60,6 +61,8 @@ public static class AdminsEndpoints
             var user = await db.AdminUsers.FindAsync(id);
             if (user is null) return Results.NotFound();
             if (user.Role == "Owner") return Results.BadRequest("The owner account cannot be deleted.");
+            if (await db.Commands.AnyAsync(c => c.CreatedByAdminId == id))
+                return Results.Conflict("This admin created orders and cannot be deleted. Their commission history must be kept.");
             db.AdminUsers.Remove(user);
             await db.SaveChangesAsync();
             return Results.NoContent();

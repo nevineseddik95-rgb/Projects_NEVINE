@@ -45,11 +45,17 @@ public sealed class OrderNotifications(
         Command order,
         Customer customer,
         string previousStatus) =>
-        Queue(
-            order,
-            customer,
-            $"Order update: {order.Status}",
-            $"Your order status changed from {previousStatus} to {order.Status}.");
+        order.Status == "Delivered"
+            ? Queue(
+                order,
+                customer,
+                "Order delivered",
+                $"Your order changed from {previousStatus} to Delivered. Thank you for shopping with Beauty & Shine.")
+            : Queue(
+                order,
+                customer,
+                $"Order update: {order.Status}",
+                $"Your order status changed from {previousStatus} to {order.Status}.");
 
     private NotificationResult Queue(
         Command order,
@@ -58,9 +64,10 @@ public sealed class OrderNotifications(
         string introduction,
         string? extraHtml = null)
     {
-        var emailQueued = !string.IsNullOrWhiteSpace(customer.Email)
+        var emailQueued = EmailAddress.TryNormalize(customer.Email, out var email)
+            && email.Length > 0
             && emailQueue.TryEnqueue(new EmailNotification(
-                customer.Email,
+                email,
                 customer.FullName,
                 $"{headline} - {order.ReferenceNumber}",
                 BuildEmail(order, customer, headline, introduction, extraHtml)));

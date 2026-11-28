@@ -5,12 +5,16 @@ import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } fro
 import { Subject, catchError, debounceTime, filter, forkJoin, merge, of, switchMap, timer } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
+import { LanguageService } from '../core/language.service';
+import { LanguageSwitcherComponent } from '../core/language-switcher.component';
 import { RealtimeService } from '../core/realtime.service';
+import { TranslatePipe } from '../core/translate.pipe';
+import { TranslationParams } from '../core/translations';
 
 interface Note {
   key: string;
   kind: 'new' | 'payment';
-  title: string;
+  titleKey: string;
   detail: string;
   ref: string;
 }
@@ -18,41 +22,42 @@ interface Note {
 @Component({
   selector: 'app-admin-layout',
   standalone: true,
-  imports: [AsyncPipe, RouterOutlet, RouterLink, RouterLinkActive],
+  imports: [AsyncPipe, RouterOutlet, RouterLink, RouterLinkActive, LanguageSwitcherComponent, TranslatePipe],
   template: `
     <div class="admin">
-      <nav class="sidebar" aria-label="Admin">
+      <nav class="sidebar" [attr.aria-label]="'admin.navigation' | translate">
         <a class="brand" routerLink="/admin">Beauty & Shine</a>
         <ul>
           @for (l of visibleLinks; track l.path) {
             <li>
               <a [routerLink]="l.path" routerLinkActive="active">
-                <span>{{ l.label }}</span>
+                <span>{{ t(l.label) }}</span>
                 @if (l.path === '/admin/orders') {
-                  @if (newOrders > 0) { <span class="pill pill-new" title="New orders">{{ newOrders }} new</span> }
-                  @if (toCheck > 0) { <span class="pill pill-check" title="Payments to check">{{ toCheck }} to check</span> }
+                  @if (newOrders > 0) { <span class="pill pill-new" [title]="'admin.newOrdersTitle' | translate">{{ t('admin.newOrders', { count: newOrders }) }}</span> }
+                  @if (toCheck > 0) { <span class="pill pill-check" [title]="'admin.toCheckTitle' | translate">{{ t('admin.toCheck', { count: toCheck }) }}</span> }
                 }
               </a>
             </li>
           }
         </ul>
         <div class="sidebar-foot">
-          <span class="who">{{ auth.username }} · {{ auth.isOwner() ? 'owner' : 'view only' }}</span>
-          <a routerLink="/" target="_blank">View storefront</a>
-          <button class="btn btn-ghost" type="button" (click)="auth.logout()">Sign out</button>
+          <span class="who">{{ auth.username }} · {{ t(auth.isOwner() ? 'admin.owner' : 'admin.viewer') }}</span>
+          <a routerLink="/" target="_blank">{{ 'admin.viewStorefront' | translate }}</a>
+          <button class="btn btn-ghost" type="button" (click)="auth.logout()">{{ 'admin.signOut' | translate }}</button>
         </div>
       </nav>
 
       <main class="content">
         <div class="topbar">
+          <app-language-switcher />
           @if (realtime.state$ | async; as live) {
             <span class="live-state" [class.offline]="live !== 'online'">
-              <i aria-hidden="true"></i>{{ live === 'online' ? 'Live updates' : 'Reconnecting…' }}
+              <i aria-hidden="true"></i>{{ (live === 'online' ? 'admin.live' : 'admin.reconnecting') | translate }}
             </span>
           }
           <div class="bell-wrap">
             <button type="button" class="bell" aria-haspopup="true" [attr.aria-expanded]="open"
-                    [attr.aria-label]="'Notifications, ' + total + ' waiting'" (click)="open = !open">
+                    [attr.aria-label]="'admin.notificationsAria' | translate: { total: total }" (click)="open = !open">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>
@@ -61,18 +66,18 @@ interface Note {
             </button>
 
             @if (open) {
-              <div class="notes" role="region" aria-label="Notifications">
+              <div class="notes" role="region" [attr.aria-label]="'admin.notifications' | translate">
                 <div class="notes-head">
-                  <strong>Notifications</strong>
-                  <button class="btn btn-ghost" type="button" (click)="markAllRead()">Mark all as read</button>
+                  <strong>{{ 'admin.notifications' | translate }}</strong>
+                  <button class="btn btn-ghost" type="button" (click)="markAllRead()">{{ 'admin.markAllRead' | translate }}</button>
                 </div>
                 @for (n of notes; track n.key) {
                   <a class="note" [class.note-pay]="n.kind === 'payment'"
                      routerLink="/admin/orders" [queryParams]="{ q: n.ref }" (click)="openNote(n)">
-                    <strong>{{ n.title }}</strong>
+                    <strong>{{ t(n.titleKey) }}</strong>
                     <span>{{ n.detail }}</span>
                   </a>
-                } @empty { <p class="muted notes-empty">Nothing new.</p> }
+                } @empty { <p class="muted notes-empty">{{ 'admin.nothingNew' | translate }}</p> }
               </div>
             }
           </div>
@@ -88,6 +93,7 @@ interface Note {
 export class AdminLayoutComponent {
   auth = inject(AuthService);
   realtime = inject(RealtimeService);
+  language = inject(LanguageService);
   private api = inject(ApiService);
   private router = inject(Router);
   private destroyRef = inject(DestroyRef);
@@ -109,16 +115,18 @@ export class AdminLayoutComponent {
   private refresh$ = new Subject<void>();
 
   links = [
-    { path: '/admin/dashboard', label: 'Dashboard', owner: false },
-    { path: '/admin/orders', label: 'Orders', owner: false },
-    { path: '/admin/products', label: 'Products', owner: false },
-    { path: '/admin/customers', label: 'Customers', owner: false },
-    { path: '/admin/genres', label: 'Genres', owner: false },
-    { path: '/admin/colors', label: 'Colors', owner: false },
-    { path: '/admin/sizes', label: 'Sizes', owner: false },
-    { path: '/admin/admins', label: 'Admins', owner: true }
+    { path: '/admin/dashboard', label: 'admin.dashboard', owner: false },
+    { path: '/admin/orders', label: 'admin.orders', owner: false },
+    { path: '/admin/commissions', label: 'admin.commissions', owner: false },
+    { path: '/admin/products', label: 'admin.products', owner: false },
+    { path: '/admin/customers', label: 'admin.customers', owner: false },
+    { path: '/admin/genres', label: 'admin.genres', owner: false },
+    { path: '/admin/colors', label: 'admin.colors', owner: false },
+    { path: '/admin/sizes', label: 'admin.sizes', owner: false },
+    { path: '/admin/admins', label: 'admin.admins', owner: true }
   ];
 
+  t(key: string, params: TranslationParams = {}): string { return this.language.t(key, params); }
   get visibleLinks() { return this.links.filter(l => !l.owner || this.auth.isOwner()); }
 
   constructor() {
@@ -190,7 +198,7 @@ export class AdminLayoutComponent {
       const value = JSON.parse(localStorage.getItem(this.paymentKey) ?? '[]');
       return new Set(Array.isArray(value) ? value.map(String) : []);
     } catch {
-      return new Set();
+      return new Set<string>();
     }
   }
 
@@ -206,12 +214,12 @@ export class AdminLayoutComponent {
     const all: Note[] = [];
 
     for (const order of [...this.orders].sort((a, b) => this.time(b) - this.time(a))) {
-      const who = this.names.get(String(order.customerId)) ?? 'A customer';
+      const who = this.names.get(String(order.customerId)) ?? this.t('common.customerFallback');
       const detail = `${who} · ${order.referenceNumber} · ${order.model}`;
       if (order.paymentStatus === 'Payment submitted' && !readPayments.has(String(order.id))) {
-        all.push({ key: `payment:${order.id}`, kind: 'payment', title: 'Payment to check', detail, ref: order.referenceNumber });
+        all.push({ key: `payment:${order.id}`, kind: 'payment', titleKey: 'admin.notificationPayment', detail, ref: order.referenceNumber });
       } else if (this.time(order) > seen) {
-        all.push({ key: `new:${order.id}`, kind: 'new', title: 'New order', detail, ref: order.referenceNumber });
+        all.push({ key: `new:${order.id}`, kind: 'new', titleKey: 'admin.notificationNew', detail, ref: order.referenceNumber });
       }
     }
 
@@ -223,7 +231,7 @@ export class AdminLayoutComponent {
     if (announce) {
       const fresh = all.filter(note => !this.known.has(note.key));
       this.known = new Set(all.map(note => note.key));
-      if (!this.firstLoad && fresh.length) this.say(`${fresh[0].title}: ${fresh[0].detail}`);
+      if (!this.firstLoad && fresh.length) this.say(`${this.t(fresh[0].titleKey)}: ${fresh[0].detail}`);
       this.firstLoad = false;
     }
   }

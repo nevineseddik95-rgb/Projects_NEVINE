@@ -11,6 +11,8 @@ export interface Field {
   required?: boolean;
   readonly?: boolean;      // shown in the list, not editable in the form
   hideInList?: boolean;
+  showInDetail?: boolean;
+  displayKey?: string;     // alternate API property used for display, such as customerName
   options?: Option[];      // fixed choices for a select
   lookup?: string;         // endpoint that supplies the choices for a select
   lookupLabel?: string;    // property used as the label, or several separated by commas
@@ -32,6 +34,10 @@ export interface CrudConfig {
   fields: Field[];
   quickChecks?: { label: string; test: (row: any) => boolean }[];   // tick-box filters
   rowActions?: RowAction[];                                           // extra buttons on each row
+  editLabel?: string;
+  canCreate?: boolean;
+  canEditRow?: (row: any) => boolean;
+  canDeleteRow?: (row: any) => boolean;
 }
 
 export const ORDER_STATUSES = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];

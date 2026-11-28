@@ -5,6 +5,10 @@ import { finalize, timeout } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { CartService, toCartProduct } from '../core/cart.service';
 import { KmfPipe } from '../core/kmf.pipe';
+import { LanguageService } from '../core/language.service';
+import { LanguageSwitcherComponent } from '../core/language-switcher.component';
+import { TranslatePipe } from '../core/translate.pipe';
+import { TranslationParams } from '../core/translations';
 
 interface CheckoutResult {
   reference: string;
@@ -23,112 +27,115 @@ interface CheckoutResult {
 @Component({
   selector: 'app-checkout',
   standalone: true,
-  imports: [KmfPipe, FormsModule, RouterLink],
+  imports: [KmfPipe, FormsModule, RouterLink, LanguageSwitcherComponent, TranslatePipe],
   template: `
     <header class="shop-head">
       <a class="brand" routerLink="/">Beauty & Shine</a>
-      <nav class="shop-nav"><a class="nav-link" routerLink="/cart">Back to cart</a></nav>
+      <nav class="shop-nav">
+        <a class="nav-link" routerLink="/cart">{{ 'checkout.backToCart' | translate }}</a>
+        <app-language-switcher />
+      </nav>
     </header>
 
     <main class="checkout">
       @if (done) {
-        <h1>Order received</h1>
+        <h1>{{ 'checkout.received' | translate }}</h1>
         <section class="summary">
-          <p class="notice">Your order reference is <strong>{{ done.reference }}</strong>. Keep it.</p>
+          <p class="notice">{{ 'checkout.referenceNotice' | translate: { reference: done.reference } }}</p>
           @if (done.emailQueued) {
-            <p class="hint">Your confirmation email is queued and will be sent shortly.</p>
+            <p class="hint">{{ 'checkout.emailQueued' | translate }}</p>
           } @else if (email) {
-            <p class="hint">Your order is saved, but the confirmation email could not be queued.</p>
+            <p class="hint">{{ 'checkout.emailNotQueued' | translate }}</p>
           }
           @if (done.smsQueued) {
-            <p class="hint">Your confirmation SMS is queued with your reference and order details.</p>
+            <p class="hint">{{ 'checkout.smsQueued' | translate }}</p>
           }
           @for (i of done.items; track i.model) {
             <div class="row"><span>{{ i.model }} × {{ i.quantity }}</span><span>{{ i.lineTotal | kmf }}</span></div>
           }
-          <div class="row"><strong>Total</strong><strong>{{ done.total | kmf }}</strong></div>
-          <div class="row"><span>Deposit to pay now</span><strong>{{ done.deposit | kmf }}</strong></div>
-          <div class="row"><span>Balance later</span><span>{{ done.balance | kmf }}</span></div>
+          <div class="row"><strong>{{ 'common.total' | translate }}</strong><strong>{{ done.total | kmf }}</strong></div>
+          <div class="row"><span>{{ 'checkout.depositNow' | translate }}</span><strong>{{ done.deposit | kmf }}</strong></div>
+          <div class="row"><span>{{ 'checkout.balanceLater' | translate }}</span><span>{{ done.balance | kmf }}</span></div>
         </section>
         <section>
-          <h2>Pay your deposit with {{ done.method }}</h2>
-          <p>{{ done.instructions || 'We will contact you with the payment details.' }}</p>
+          <h2>{{ 'checkout.payWith' | translate: { method: done.method } }}</h2>
+          <p>{{ done.instructions || ('checkout.instructionsFallback' | translate) }}</p>
 
           @if (noticeSent) {
-            <p class="notice">Thank you. We received your transaction ID and will confirm your order once we check the payment.</p>
+            <p class="notice">{{ 'checkout.noticeReceived' | translate }}</p>
             @if (noticeSmsQueued) {
-              <p class="hint">Your payment-update SMS is queued.</p>
+              <p class="hint">{{ 'checkout.noticeSms' | translate }}</p>
             }
           } @else {
             <form #pf="ngForm" (ngSubmit)="sendNotice()">
               <div class="field">
-                <label for="txid">Transaction ID from your payment message</label>
+                <label for="txid">{{ 'checkout.transactionLabel' | translate }}</label>
                 <input id="txid" name="txid" [(ngModel)]="transactionId" required minlength="3" maxlength="100"
-                       autocomplete="off" placeholder="Example: MP2406.1234.ABCD">
-                <p class="hint">Copy the full reference from your MVola confirmation message.</p>
+                       autocomplete="off" [placeholder]="'checkout.transactionPlaceholder' | translate">
+                <p class="hint">{{ 'checkout.transactionHint' | translate }}</p>
               </div>
               @if (noticeError) { <p class="alert" role="alert">{{ noticeError }}</p> }
               <button class="btn btn-primary" type="submit" [disabled]="pf.invalid || busy">
-                {{ busy ? 'Submitting transaction…' : 'I have paid' }}
+                {{ busy ? ('checkout.submittingTransaction' | translate) : ('checkout.havePaid' | translate) }}
               </button>
             </form>
           }
-          <p><a class="btn btn-ghost" routerLink="/">Continue shopping</a></p>
+          <p><a class="btn btn-ghost" routerLink="/">{{ 'checkout.continueShopping' | translate }}</a></p>
         </section>
       } @else if (cart.lines().length === 0) {
-        <h1>Your cart is empty</h1>
-        <p class="muted"><a routerLink="/">Browse products</a></p>
+        <h1>{{ 'checkout.emptyTitle' | translate }}</h1>
+        <p class="muted"><a routerLink="/">{{ 'cart.browse' | translate }}</a></p>
       } @else {
-        <h1>Checkout</h1>
+        <h1>{{ 'checkout.title' | translate }}</h1>
 
-        <section class="summary" aria-label="Your order">
+        <section class="summary" [attr.aria-label]="'common.yourOrder' | translate">
           @for (l of cart.lines(); track l.productId) {
             <div class="row"><span>{{ l.model }} × {{ l.quantity }}</span><span>{{ l.price * l.quantity | kmf }}</span></div>
           }
-          <div class="row"><strong>Total</strong><strong>{{ cart.total() | kmf }}</strong></div>
-          <div class="row"><span>Minimum deposit (40%)</span><span>{{ minDeposit | kmf }}</span></div>
-          <div class="row"><span>Balance after your deposit</span><span>{{ balance | kmf }}</span></div>
+          <div class="row"><strong>{{ 'common.total' | translate }}</strong><strong>{{ cart.total() | kmf }}</strong></div>
+          <div class="row"><span>{{ 'common.minimumDeposit' | translate }}</span><span>{{ minDeposit | kmf }}</span></div>
+          <div class="row"><span>{{ 'checkout.balanceAfterDeposit' | translate }}</span><span>{{ balance | kmf }}</span></div>
         </section>
 
         <form #f="ngForm" (ngSubmit)="submit()">
           <div class="field">
-            <label for="fullName">Full name</label>
+            <label for="fullName">{{ 'checkout.fullName' | translate }}</label>
             <input id="fullName" name="fullName" autocomplete="name" [(ngModel)]="fullName" required>
           </div>
           <div class="field">
-            <label for="email">Email (optional)</label>
+            <label for="email">{{ 'checkout.emailOptional' | translate }}</label>
             <input id="email" name="email" type="email" autocomplete="email" [(ngModel)]="email">
-            <p class="hint">Add an email to receive your order confirmation and status updates.</p>
+            <p class="hint">{{ 'checkout.emailHint' | translate }}</p>
           </div>
           <div class="field">
-            <label for="phone">Phone</label>
+            <label for="phone">{{ 'checkout.phone' | translate }}</label>
             <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+269 321 2345" [(ngModel)]="phone" required>
           </div>
           @if (smsAvailable) {
             <label class="check">
               <input type="checkbox" name="smsUpdates" [(ngModel)]="smsUpdates">
-              Text me order updates by SMS
+              {{ 'checkout.smsConsent' | translate }}
             </label>
-            <p class="hint">Includes your reference, items, payment confirmation, and delivery status.</p>
+            <p class="hint">{{ 'checkout.smsHint' | translate }}</p>
           }
           <div class="field">
-            <label for="address">Delivery address</label>
+            <label for="address">{{ 'checkout.deliveryAddress' | translate }}</label>
             <textarea id="address" name="address" rows="3" autocomplete="street-address" [(ngModel)]="address" required></textarea>
           </div>
           <div class="field">
-            <label for="deposit">Deposit to pay now (KMF)</label>
+            <label for="deposit">{{ 'checkout.depositLabel' | translate }}</label>
             <input id="deposit" name="deposit" type="number" step="1" [min]="minDeposit" [max]="cart.total()" [(ngModel)]="deposit" required>
-            <p class="hint">At least {{ minDeposit | kmf }} and no more than {{ cart.total() | kmf }}.</p>
+            <p class="hint">{{ depositHint }}</p>
           </div>
           <div class="field">
-            <label for="method">Payment method</label>
+            <label for="method">{{ 'checkout.paymentMethod' | translate }}</label>
             <input id="method" name="method" [(ngModel)]="method" readonly>
-            <p class="hint">You will see the MVola payment instructions after you place the order.</p>
+            <p class="hint">{{ 'checkout.methodHint' | translate }}</p>
           </div>
 
           @if (error) { <p class="alert" role="alert">{{ error }}</p> }
           <button class="btn btn-primary wide" type="submit" [disabled]="f.invalid || !depositOk || busy">
-            {{ busy ? 'Placing your order…' : 'Place order' }}
+            {{ busy ? ('checkout.placing' | translate) : ('checkout.placeOrder' | translate) }}
           </button>
         </form>
       }
@@ -138,6 +145,7 @@ interface CheckoutResult {
 export class CheckoutComponent implements OnInit {
   api = inject(ApiService);
   cart = inject(CartService);
+  language = inject(LanguageService);
 
   fullName = '';
   email = '';
@@ -155,6 +163,8 @@ export class CheckoutComponent implements OnInit {
   noticeSent = false;
   noticeSmsQueued = false;
   noticeError = '';
+
+  t(key: string, params: TranslationParams = {}): string { return this.language.t(key, params); }
 
   ngOnInit(): void {
     this.deposit = this.minDeposit;
@@ -179,6 +189,11 @@ export class CheckoutComponent implements OnInit {
 
   get balance(): number {
     return Math.max(0, this.cart.total() - (this.deposit ?? 0));
+  }
+
+  get depositHint(): string {
+    const money = (value: number) => new Intl.NumberFormat(this.language.locale(), { maximumFractionDigits: 0 }).format(value) + ' KMF';
+    return this.t('checkout.depositHint', { minimum: money(this.minDeposit), total: money(this.cart.total()) });
   }
 
   get depositOk(): boolean {
@@ -209,10 +224,10 @@ export class CheckoutComponent implements OnInit {
       },
       error: error => {
         this.error = typeof error.error === 'string' && error.error
-          ? error.error
+          ? this.language.apiMessage(error.error)
           : error.name === 'TimeoutError'
-            ? 'The server took too long to respond. Your order may already be saved; check your connection before trying again.'
-            : 'The order could not be placed. Check your details and try again.';
+            ? this.t('checkout.timeout')
+            : this.t('checkout.orderFailed');
       }
     });
   }
@@ -221,7 +236,7 @@ export class CheckoutComponent implements OnInit {
     if (!this.done || this.busy) return;
     const transactionId = this.transactionId.trim();
     if (transactionId.length < 3 || transactionId.length > 100) {
-      this.noticeError = 'Enter the complete transaction ID from your payment message.';
+      this.noticeError = this.t('checkout.transactionRequired');
       return;
     }
 
@@ -241,10 +256,10 @@ export class CheckoutComponent implements OnInit {
       },
       error: error => {
         this.noticeError = typeof error.error === 'string' && error.error
-          ? error.error
+          ? this.language.apiMessage(error.error)
           : error.name === 'TimeoutError'
-            ? 'The request timed out. Wait a moment, then submit the same transaction ID again; duplicate submissions are safe.'
-            : 'We could not save the transaction ID. Check it and try again.';
+            ? this.t('checkout.noticeTimeout')
+            : this.t('checkout.noticeFailed');
       }
     });
   }
