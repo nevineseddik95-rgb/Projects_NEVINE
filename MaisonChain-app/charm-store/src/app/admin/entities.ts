@@ -33,9 +33,9 @@ const depositConfirmed = (row: any) => row.paymentStatus === 'Deposit paid' || r
 
 function currentLanguage(): Language {
   try {
-    return localStorage.getItem('charm_language') === 'fr' ? 'fr' : 'en';
+    return localStorage.getItem('charm_language') === 'en' ? 'en' : 'fr';
   } catch {
-    return 'en';
+    return 'fr';
   }
 }
 
@@ -159,8 +159,8 @@ export const ADMINS: CrudConfig = {
   canDeleteRow: row => row.role !== 'Owner',
   fields: [
     { key: 'username', label: 'admin.username', type: 'text', required: true },
-    { key: 'password', label: 'admin.password', type: 'password', hideInList: true, showInDetail: false },
-    { key: 'role', label: 'admin.role', type: 'text', readonly: true },
+    { key: 'password', label: 'admin.password', type: 'password', required: true, hideInList: true, showInDetail: false, showInForm: true },
+    { key: 'role', label: 'admin.role', type: 'text', readonly: true, defaultValue: 'Viewer' },
     { key: 'createdAt', label: 'common.created', type: 'datetime', readonly: true }
   ]
 };

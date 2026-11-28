@@ -168,10 +168,9 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
     }
 
     [Fact]
-    public async Task Product_html_has_localized_metadata_json_ld_and_crawler_text()
+    public async Task Product_html_defaults_to_french_with_localized_metadata_json_ld_and_crawler_text()
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"/product/{ApiFixture.ProductId}");
-        request.Headers.Add("Accept-Language", "fr-FR,fr;q=0.9");
         using var response = await fixture.Client.SendAsync(request);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(response.Headers.CacheControl?.NoCache);
@@ -196,6 +195,20 @@ public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFix
         Assert.Equal("Golden <Bracelet>", structured.RootElement.GetProperty("name").GetString());
         Assert.Equal("12500.00", structured.RootElement.GetProperty("offers").GetProperty("price").GetString());
         Assert.Equal("KMF", structured.RootElement.GetProperty("offers").GetProperty("priceCurrency").GetString());
+    }
+
+    [Fact]
+    public async Task Product_html_honors_an_english_accept_language_header()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/product/{ApiFixture.ProductId}");
+        request.Headers.Add("Accept-Language", "en-US,en;q=0.9");
+        using var response = await fixture.Client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("<html lang=\"en\"", html);
+        Assert.Contains("Discover Golden &lt;Bracelet&gt;", html);
+        Assert.Contains("View the collection", html);
     }
 
     [Fact]

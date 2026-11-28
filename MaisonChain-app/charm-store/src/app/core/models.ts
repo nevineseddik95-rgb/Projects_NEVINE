@@ -12,6 +12,8 @@ export interface Field {
   readonly?: boolean;      // shown in the list, not editable in the form
   hideInList?: boolean;
   showInDetail?: boolean;
+  showInForm?: boolean;
+  defaultValue?: any;
   displayKey?: string;     // alternate API property used for display, such as customerName
   options?: Option[];      // fixed choices for a select
   lookup?: string;         // endpoint that supplies the choices for a select

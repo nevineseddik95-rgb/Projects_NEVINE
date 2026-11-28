@@ -72,8 +72,9 @@ public static class SeoEndpoints
             var indexPath = Path.Combine(environment.ContentRootPath, "wwwroot", "index.html");
             if (!File.Exists(indexPath)) return Results.NotFound();
 
-            var french = context.Request.Headers.AcceptLanguage.ToString()
-                .StartsWith("fr", StringComparison.OrdinalIgnoreCase);
+            var acceptLanguage = context.Request.Headers.AcceptLanguage.ToString();
+            var french = string.IsNullOrWhiteSpace(acceptLanguage)
+                || acceptLanguage.StartsWith("fr", StringComparison.OrdinalIgnoreCase);
             var origin = CanonicalOrigin(configuration);
             var url = $"{origin}/product/{product.Id}";
             var title = $"{product.Model} | Beauty & Shine";

@@ -57,6 +57,7 @@ const en: Record<string, string> = {
   'common.reference': 'Reference',
   'common.date': 'Date',
   'common.created': 'Created',
+  'common.assignedOnSave': 'Assigned automatically after saving',
   'common.updated': 'Last updated',
   'common.image': 'Image',
   'common.customer': 'Customer',
@@ -304,7 +305,8 @@ const en: Record<string, string> = {
   'admin.cancelOrder': 'Cancel order',
   'admin.cancelPrompt': 'Cancel this order? This cannot be undone. Refund any confirmed payment manually.',
   'admin.username': 'Username',
-  'admin.password': 'Password (at least 8 characters; leave empty to keep it)',
+  'admin.password': 'Password (at least 8 characters)',
+  'admin.passwordKeep': 'Leave empty to keep the current password',
   'admin.role': 'Role',
   'admin.customerEmail': 'Customer email',
   'admin.customerPhone': 'Customer phone',
@@ -454,6 +456,7 @@ const fr: Record<string, string> = {
   'common.reference': 'Référence',
   'common.date': 'Date',
   'common.created': 'Créé le',
+  'common.assignedOnSave': 'Attribué automatiquement après l’enregistrement',
   'common.updated': 'Dernière mise à jour',
   'common.image': 'Image',
   'common.customer': 'Client',
@@ -701,7 +704,8 @@ const fr: Record<string, string> = {
   'admin.cancelOrder': 'Annuler la commande',
   'admin.cancelPrompt': 'Annuler cette commande ? Cette action est irréversible. Remboursez manuellement tout paiement confirmé.',
   'admin.username': 'Nom d’utilisateur',
-  'admin.password': 'Mot de passe (8 caractères minimum ; laissez vide pour le conserver)',
+  'admin.password': 'Mot de passe (8 caractères minimum)',
+  'admin.passwordKeep': 'Laissez vide pour conserver le mot de passe actuel',
   'admin.role': 'Rôle',
   'admin.customerEmail': 'E-mail du client',
   'admin.customerPhone': 'Téléphone du client',
@@ -809,7 +813,7 @@ export function initialLanguage(): Language {
   } catch {
     // Storage can be unavailable in private browsing.
   }
-  return navigator.language.toLowerCase().startsWith('fr') ? 'fr' : 'en';
+  return 'fr';
 }
 
 const apiMessageKeys: Record<string, string> = {

@@ -109,7 +109,7 @@ export class CrudPageComponent implements OnInit {
     const visible = new Set(this.visibleKeys);
     return this.listFields.filter(f => visible.has(f.key));
   }
-  get formFields(): Field[] { return this.cfg.fields.filter(f => !f.readonly && f.showInDetail !== false); }
+  get formFields(): Field[] { return this.cfg.fields.filter(f => !f.readonly && (f.showInForm ?? f.showInDetail !== false)); }
   get readonlyFields(): Field[] { return this.cfg.fields.filter(f => f.readonly && f.showInDetail !== false); }
   get detailFields(): Field[] { return this.cfg.fields.filter(f => f.showInDetail !== false); }
   get filterFields(): Field[] {
@@ -212,6 +212,7 @@ export class CrudPageComponent implements OnInit {
     const v = row[f.key];
     if (f.key === 'status' && v) return this.t(`status.${v}`);
     if (f.key === 'paymentStatus' && v) return this.t(`payment.${v}`);
+    if (f.key === 'role' && v) return this.t(`admin.${String(v).toLowerCase()}`);
     return f.type === 'select' ? this.options(f).find(o => o.value === v)?.label ?? '' : v ?? '';
   }
 
@@ -269,7 +270,11 @@ export class CrudPageComponent implements OnInit {
   openNew(): void {
     if (!this.canCreate) return;
     this.editing = {};
+    for (const f of this.cfg.fields) {
+      if (f.defaultValue !== undefined) this.editing[f.key] = f.defaultValue;
+    }
     for (const f of this.formFields) {
+      if (this.editing[f.key] !== undefined) continue;
       if (f.type === 'date') this.editing[f.key] = new Date().toISOString().slice(0, 10);
       else if (f.type === 'select' && f.options) this.editing[f.key] = f.options[0].value;
       else if (f.type === 'select') this.editing[f.key] = null;

@@ -272,7 +272,9 @@
             } @else if (f.type === 'email') {
               <input [id]="f.key" [name]="f.key" type="email" [(ngModel)]="editing[f.key]" [required]="!!f.required">
             } @else if (f.type === 'password') {
-              <input [id]="f.key" [name]="f.key" type="password" autocomplete="new-password" [(ngModel)]="editing[f.key]">
+              <input [id]="f.key" [name]="f.key" type="password" autocomplete="new-password" minlength="8"
+                     [(ngModel)]="editing[f.key]" [required]="isNew && !!f.required">
+              @if (!isNew) { <small class="muted">{{ 'admin.passwordKeep' | translate }}</small> }
             } @else {
               <input [id]="f.key" [name]="f.key" type="text" [(ngModel)]="editing[f.key]" [required]="!!f.required">
             }
@@ -282,7 +284,7 @@
         @if (readonlyFields.length) {
           <div class="readonly-fields">
             @for (f of readonlyFields; track f.key) {
-              <div class="detail-row"><span>{{ t(f.label) }}</span><strong>{{ label(editing, f) || '—' }}</strong></div>
+              <div class="detail-row"><span>{{ t(f.label) }}</span><strong>{{ isNew && f.key === 'createdAt' ? t('common.assignedOnSave') : (label(editing, f) || '—') }}</strong></div>
             }
           </div>
         }
