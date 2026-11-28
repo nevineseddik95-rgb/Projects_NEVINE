@@ -29,6 +29,73 @@ namespace ProductStore.IntegrationTests;
 public sealed class PayoutAndSeoTests(ApiFixture fixture) : IClassFixture<ApiFixture>
 {
     [Fact]
+    public async Task Owner_can_edit_and_delete_viewer_admin_with_database_persistence()
+    {
+        using var created = await SendJson(HttpMethod.Post, "/admins", "Owner", new
+        {
+            username = "temporary-viewer",
+            password = "InitialPass123!"
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        using var createdPayload = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        var id = createdPayload.RootElement.GetProperty("id").GetGuid();
+
+        using var updated = await SendJson(HttpMethod.Put, $"/admins/{id}", "Owner", new
+        {
+            username = "renamed-viewer",
+            password = "UpdatedPass123!"
+        });
+        Assert.Equal(HttpStatusCode.NoContent, updated.StatusCode);
+
+        var stored = await fixture.FindAdminAsync(id);
+        Assert.NotNull(stored);
+        Assert.Equal("renamed-viewer", stored.Username);
+        Assert.Equal("Viewer", stored.Role);
+        var hasher = new Microsoft.AspNetCore.Identity.PasswordHasher<AdminUser>();
+        Assert.Equal(Microsoft.AspNetCore.Identity.PasswordVerificationResult.Success,
+            hasher.VerifyHashedPassword(stored, stored.PasswordHash, "UpdatedPass123!"));
+
+        using var listed = await Send(HttpMethod.Get, "/admins", "Owner");
+        Assert.Equal(HttpStatusCode.OK, listed.StatusCode);
+        using var listedPayload = JsonDocument.Parse(await listed.Content.ReadAsStringAsync());
+        Assert.Contains(listedPayload.RootElement.EnumerateArray(),
+            item => item.GetProperty("username").GetString() == "renamed-viewer");
+
+        using var deleted = await Send(HttpMethod.Delete, $"/admins/{id}", "Owner");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        Assert.Null(await fixture.FindAdminAsync(id));
+    }
+
+    [Fact]
+    public async Task Only_owner_can_manage_admins_and_owner_account_is_protected()
+    {
+        using var viewerEdit = await SendJson(HttpMethod.Put, $"/admins/{ApiFixture.OtherViewerId}", "Viewer", new
+        {
+            username = "viewer-attempt",
+            password = (string?)null
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, viewerEdit.StatusCode);
+
+        using var viewerDelete = await Send(HttpMethod.Delete, $"/admins/{ApiFixture.OtherViewerId}", "Viewer");
+        Assert.Equal(HttpStatusCode.Forbidden, viewerDelete.StatusCode);
+
+        using var ownerEdit = await SendJson(HttpMethod.Put, $"/admins/{ApiFixture.OwnerId}", "Owner", new
+        {
+            username = "owner-attempt",
+            password = (string?)null
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, ownerEdit.StatusCode);
+
+        using var ownerDelete = await Send(HttpMethod.Delete, $"/admins/{ApiFixture.OwnerId}", "Owner");
+        Assert.Equal(HttpStatusCode.BadRequest, ownerDelete.StatusCode);
+
+        var owner = await fixture.FindAdminAsync(ApiFixture.OwnerId);
+        Assert.NotNull(owner);
+        Assert.Equal("owner", owner.Username);
+        Assert.Equal("Owner", owner.Role);
+    }
+
+    [Fact]
     public async Task Owner_can_record_partial_full_and_reverse_a_payout()
     {
         var initial = await GetCommissions("Owner");
@@ -434,6 +501,7 @@ public sealed class ApiFixture : IAsyncLifetime
         app.UseRateLimiter();
         app.UseAuthentication();
         app.UseAuthorization();
+        app.MapAdminsEndpoints();
         app.MapCommandsEndpoints();
         app.MapCheckoutEndpoints();
         app.MapCustomersEndpoints();
@@ -478,6 +546,13 @@ public sealed class ApiFixture : IAsyncLifetime
             if (notification.ToEmail == recipient) return notification;
         }
         return null;
+    }
+
+    public async Task<AdminUser?> FindAdminAsync(Guid id)
+    {
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ProductStoreContext>();
+        return await db.AdminUsers.AsNoTracking().FirstOrDefaultAsync(user => user.Id == id);
     }
 
     public async Task<Guid> AddOrderAsync(Guid adminId, decimal total, string status, decimal paidAmount)
